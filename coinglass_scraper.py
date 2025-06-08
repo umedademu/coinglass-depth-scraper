@@ -300,21 +300,55 @@ class CoinglassScraperFinal:
             return None, None
 
     def get_current_price(self):
-        """現在価格を取得"""
+        """現在価格を取得（小数点第1位まで）"""
         try:
-            # 複数の方法で現在価格を探す
+            # 方法1: 画面下部のバーから正確な価格を取得
+            # 複数の取引所の価格が表示されているエリアから取得
+            price_data = self.driver.execute_script("""
+                // Numberクラスを持つ要素を探す（画面下部のバー）
+                const numberElements = document.querySelectorAll('div.Number');
+                
+                for (const elem of numberElements) {
+                    const text = elem.textContent.trim();
+                    // 小数点を含む価格形式かチェック
+                    if (text && text.includes('.') && text.length > 5) {
+                        const value = parseFloat(text.replace(/,/g, ''));
+                        // BTCの妥当な価格範囲内かチェック
+                        if (!isNaN(value) && value > 50000 && value < 200000) {
+                            // Y座標が画面下部（700より大きい）かチェック
+                            const rect = elem.getBoundingClientRect();
+                            if (rect.top > 700) {
+                                return value;
+                            }
+                        }
+                    }
+                }
+                
+                // 方法2: XPathで特定の位置から取得（フォールバック）
+                try {
+                    // 最初の価格要素（通常Binance）
+                    const xpath = '//*[@id="__next"]/div[2]/div[2]/div[2]/div[1]/div[2]/div[1]/div[4]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]';
+                    const elem = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (elem) {
+                        const text = elem.textContent.trim();
+                        if (text && text.includes('.')) {
+                            return parseFloat(text.replace(/,/g, ''));
+                        }
+                    }
+                } catch (e) {
+                    console.error('XPath取得エラー:', e);
+                }
+                
+                return null;
+            """)
             
-            # 方法1: 価格表示要素から
-            price_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, '104')]")
-            if price_elements:
-                for elem in price_elements:
-                    text = elem.text.strip()
-                    if re.match(r'^\d{6}', text):  # 6桁の数字で始まる
-                        return float(text.replace(',', ''))
+            if price_data:
+                self.logger.info(f"正確な現在価格を取得: {price_data}")
+                return price_data
             
-            # 方法2: JavaScriptで取得
+            # 方法2: 板情報の中央値から推測（フォールバック）
+            self.logger.warning("正確な価格が取得できません。板情報から推測します")
             current_price = self.driver.execute_script("""
-                // 中央の価格を探す
                 const priceElements = document.querySelectorAll('.obv2-item-price');
                 if (priceElements.length > 0) {
                     const midIndex = Math.floor(priceElements.length / 2);
@@ -324,14 +358,16 @@ class CoinglassScraperFinal:
             """)
             
             if current_price:
+                self.logger.info(f"板情報から推測した価格: {current_price}")
                 return current_price
             
-            # デフォルト値（スクリーンショットから）
-            return 104530.0
+            # デフォルト値
+            self.logger.warning("価格取得に失敗。デフォルト値を使用")
+            return 105000.0
             
         except Exception as e:
             self.logger.error(f"現在価格の取得に失敗: {str(e)}")
-            return 104530.0  # デフォルト値
+            return 105000.0  # デフォルト値
 
     def get_order_book_data(self):
         """売り板と買い板の総量を取得（実際の構造に基づく）"""
@@ -649,9 +685,9 @@ class ScraperGUIFinal:
             ask_count = data.get('askCount', 0)
             bid_count = data.get('bidCount', 0)
             
-            # 現在価格
+            # 現在価格（小数点第1位まで表示）
             if current_price > 0:
-                self.price_label.config(text=f"{current_price:,.0f}")
+                self.price_label.config(text=f"{current_price:,.1f}")
             
             # 売り板・買い板（完全な板情報を優先表示）
             full_ask_total = data.get('fullAskTotal', ask_total)
