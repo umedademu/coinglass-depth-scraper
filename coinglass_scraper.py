@@ -580,7 +580,7 @@ class ScraperGUIFinal:
         self.ratio_label = ttk.Label(ratio_frame, text="---", font=('Arial', 14, 'bold'))
         self.ratio_label.pack(side=tk.LEFT, padx=10)
         
-        ttk.Label(ratio_frame, text="差額:", font=('Arial', 12)).pack(side=tk.LEFT, padx=20)
+        ttk.Label(ratio_frame, text="差枚:", font=('Arial', 12)).pack(side=tk.LEFT, padx=20)
         self.diff_label = ttk.Label(ratio_frame, text="---", font=('Arial', 14, 'bold'))
         self.diff_label.pack(side=tk.LEFT, padx=10)
         
