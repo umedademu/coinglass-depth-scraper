@@ -1,5 +1,5 @@
 @echo off
-echo Coinglass Scraper Final Version を起動しています...
+echo Coinglass Scraper を起動しています...
 echo.
 
 REM 仮想環境をアクティベート
@@ -14,6 +14,6 @@ if exist "venv" (
 
 REM アプリケーションを実行
 echo アプリケーションを起動しています...
-python coinglass_scraper_final.py
+python coinglass_scraper.py
 
 pause

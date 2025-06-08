@@ -13,8 +13,8 @@
 - **ヘッドレスモード**: バックグラウンドで実行可能
 
 ## ファイル一覧
-1. **coinglass_scraper_final.py** - 最終版のメインプログラム
-2. **run_scraper_final.bat** - 実行用バッチファイル
+1. **coinglass_scraper.py** - 最終版のメインプログラム
+2. **run_scraper.bat** - 実行用バッチファイル
 3. **page_analyzer.py** - ページ構造分析ツール（開発時に使用）
 4. **run_analyzer.bat** - 分析ツール実行用
 
@@ -24,7 +24,7 @@
 1. `setup_scraper.bat`を実行（必要なライブラリをインストール）
 
 ### アプリケーションの実行
-1. `run_scraper_final.bat`をダブルクリック
+1. `run_scraper.bat`をダブルクリック
 2. GUIが起動したら「開始」ボタンをクリック
 
 ## 使い方
