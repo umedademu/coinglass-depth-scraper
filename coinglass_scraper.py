@@ -18,6 +18,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 import json
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from collections import deque
+import matplotlib.dates as mdates
 import traceback
 import re
 import os
@@ -554,13 +559,20 @@ class ScraperGUIFinal:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Coinglass BTC-USDT Order Book Monitor - Final Version")
-        self.root.geometry("950x750")
+        self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         self.scraper = CoinglassScraperFinal()
         self.scraper_thread = None
         self.data_history = []
         
+        # グラフ用のデータ履歴（最大300点保持）
+        self.max_history = 300
+        self.time_history = deque(maxlen=self.max_history)
+        self.ask_history = deque(maxlen=self.max_history)
+        self.bid_history = deque(maxlen=self.max_history)
+        
         self.setup_ui()
+        self.setup_graph()
         
     def setup_ui(self):
         """UIのセットアップ"""
@@ -661,18 +673,25 @@ class ScraperGUIFinal:
                                         variable=self.headless_var)
         headless_check.grid(row=0, column=2, padx=20)
         
-        # ログ表示エリア
-        log_frame = ttk.LabelFrame(main_frame, text="ログ", padding="5")
-        log_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        # グラフ表示エリア
+        self.graph_frame = ttk.LabelFrame(main_frame, text="板推移グラフ", padding="5")
+        self.graph_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=15, width=110)
+        # ログ表示エリア（高さを調整）
+        log_frame = ttk.LabelFrame(main_frame, text="ログ", padding="5")
+        log_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, width=110)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # グリッドの重み設定
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(4, weight=2)  # グラフに重みを設定
+        main_frame.rowconfigure(5, weight=1)  # ログに重みを設定
+        self.graph_frame.columnconfigure(0, weight=1)
+        self.graph_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         
@@ -725,6 +744,14 @@ class ScraperGUIFinal:
             self.data_history.append(data)
             if len(self.data_history) > 1000:  # 最新1000件のみ保持
                 self.data_history.pop(0)
+            
+            # グラフ用データを追加
+            self.time_history.append(datetime.now())
+            self.ask_history.append(full_ask_total)
+            self.bid_history.append(full_bid_total)
+            
+            # グラフを更新
+            self.update_graph()
         else:
             self.add_log("データ取得に失敗しました（板情報が空です）", "WARNING")
     
@@ -734,6 +761,90 @@ class ScraperGUIFinal:
         log_entry = f"[{timestamp}] {level}: {message}\n"
         self.log_text.insert(tk.END, log_entry)
         self.log_text.see(tk.END)
+    
+    def setup_graph(self):
+        """グラフをセットアップ"""
+        # matplotlibのスタイル設定
+        plt.style.use('dark_background')
+        
+        # フィギュアとサブプロットを作成
+        self.fig = Figure(figsize=(10, 5), dpi=80)
+        self.fig.patch.set_facecolor('#2b2b2b')
+        
+        # 売り板用のサブプロット（上側）
+        self.ax_ask = self.fig.add_subplot(2, 1, 1)
+        self.ax_ask.set_facecolor('#1e1e1e')
+        self.ax_ask.grid(True, alpha=0.2, color='#444444')
+        self.ax_ask.set_ylim(0, 1)  # 初期値、自動調整される
+        
+        # 買い板用のサブプロット（下側）
+        self.ax_bid = self.fig.add_subplot(2, 1, 2)
+        self.ax_bid.set_facecolor('#1e1e1e')
+        self.ax_bid.grid(True, alpha=0.2, color='#444444')
+        self.ax_bid.set_ylim(0, 1)  # 初期値、自動調整される
+        
+        # 売り板のY軸を反転（下向きに表示）
+        self.ax_ask.invert_yaxis()
+        
+        # レイアウト調整
+        self.fig.tight_layout(pad=2.0)
+        
+        # tkinterにキャンバスを埋め込む
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 初期グラフを描画
+        self.canvas.draw()
+    
+    def update_graph(self):
+        """グラフを更新"""
+        if len(self.time_history) < 2:
+            return  # データが少なすぎる場合は更新しない
+        
+        try:
+            # 時間データをmatplotlib形式に変換
+            times = list(self.time_history)
+            asks = list(self.ask_history)
+            bids = list(self.bid_history)
+            
+            # 売り板グラフを更新
+            self.ax_ask.clear()
+            self.ax_ask.plot(times, asks, color='#ff6b6b', linewidth=2)
+            self.ax_ask.fill_between(times, asks, 0, color='#ff6b6b', alpha=0.3)
+            self.ax_ask.grid(True, alpha=0.2, color='#444444')
+            self.ax_ask.set_facecolor('#1e1e1e')
+            
+            # 売り板の最大値を動的に設定
+            if asks:
+                max_ask = max(asks) * 1.1  # 10%の余裕を持たせる
+                self.ax_ask.set_ylim(0, max_ask)
+            
+            # 売り板のY軸を反転（下向きに表示）
+            self.ax_ask.invert_yaxis()
+            
+            # 買い板グラフを更新
+            self.ax_bid.clear()
+            self.ax_bid.plot(times, bids, color='#51cf66', linewidth=2)
+            self.ax_bid.fill_between(times, bids, 0, color='#51cf66', alpha=0.3)
+            self.ax_bid.grid(True, alpha=0.2, color='#444444')
+            self.ax_bid.set_facecolor('#1e1e1e')
+            
+            # 買い板の最大値を動的に設定
+            if bids:
+                max_bid = max(bids) * 1.1  # 10%の余裕を持たせる
+                self.ax_bid.set_ylim(0, max_bid)
+            
+            # X軸の設定（時刻表示）
+            for ax in [self.ax_ask, self.ax_bid]:
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+                ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            
+            # グラフを再描画
+            self.canvas.draw()
+            
+        except Exception as e:
+            self.add_log(f"グラフ更新エラー: {str(e)}", "ERROR")
         
     def take_screenshot(self):
         """スクリーンショットを撮影"""
