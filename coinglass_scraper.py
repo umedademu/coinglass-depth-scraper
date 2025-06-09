@@ -6,7 +6,7 @@ Coinglass.com BTC-USDT Order Book Scraper Final Version
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext
 import threading
 import time
 from datetime import datetime
@@ -17,14 +17,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
-import json
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from collections import deque
 import matplotlib.dates as mdates
 import traceback
-import re
 import os
 import sys
 import platform
@@ -38,6 +36,7 @@ class CoinglassScraperFinal:
         self.is_running = False
         self.update_interval = 5
         self.url = "https://www.coinglass.com/ja/mergev2/BTC-USDT"
+        self.last_valid_price = None  # 前回の有効な価格を保存
         
         # ログ設定
         logging.basicConfig(
@@ -330,8 +329,8 @@ class CoinglassScraperFinal:
             self.logger.debug(f"エラーの詳細: {traceback.format_exc()}")
             return None, None
 
-    def get_current_price(self):
-        """現在価格を取得（小数点第1位まで）"""
+    def _fetch_price_from_page(self):
+        """ページから価格を取得する内部メソッド"""
         try:
             # 方法1: 画面下部のバーから正確な価格を取得
             # 複数の取引所の価格が表示されているエリアから取得
@@ -392,13 +391,39 @@ class CoinglassScraperFinal:
                 self.logger.info(f"板情報から推測した価格: {current_price}")
                 return current_price
             
-            # デフォルト値
-            self.logger.warning("価格取得に失敗。デフォルト値を使用")
-            return 105000.0
+            # 価格が取得できない場合はNoneを返す
+            return None
             
         except Exception as e:
-            self.logger.error(f"現在価格の取得に失敗: {str(e)}")
-            return 105000.0  # デフォルト値
+            self.logger.error(f"価格取得エラー: {str(e)}")
+            return None
+    
+    def get_current_price(self):
+        """現在価格を取得（再試行機能付き）"""
+        # 1回目の試行
+        price = self._fetch_price_from_page()
+        if price and price > 0:
+            self.last_valid_price = price
+            return price
+        
+        # 1回目が失敗したら、少し待って再試行
+        self.logger.warning("価格取得に失敗。再試行します...")
+        time.sleep(0.5)
+        
+        # 2回目の試行
+        price = self._fetch_price_from_page()
+        if price and price > 0:
+            self.last_valid_price = price
+            return price
+        
+        # 両方失敗した場合、前回の有効な価格を使用
+        if self.last_valid_price:
+            self.logger.warning(f"価格取得に失敗。前回の価格 {self.last_valid_price} を使用します")
+            return self.last_valid_price
+        else:
+            # 初回起動時など、前回値もない場合はエラー
+            self.logger.error("価格を取得できません。前回の値もありません")
+            raise ValueError("現在価格を取得できません")
 
     def get_order_book_data(self):
         """売り板と買い板の総量を取得（実際の構造に基づく）"""
@@ -408,8 +433,12 @@ class CoinglassScraperFinal:
                 return None
             
             # 現在価格を取得
-            current_price = self.get_current_price()
-            self.logger.info(f"現在価格: {current_price}")
+            try:
+                current_price = self.get_current_price()
+                self.logger.info(f"現在価格: {current_price}")
+            except ValueError as e:
+                self.logger.error(f"価格取得エラー: {str(e)}")
+                return None
             
             # 完全な板情報（スクロールして最端のトータル値）を取得
             full_ask_total, full_bid_total = self.get_full_order_book_totals()
@@ -480,9 +509,6 @@ class CoinglassScraperFinal:
                 return getOrderBookData(arguments[0]);
             """, current_price)
             
-            # 追加の検証: テーブルから直接取得
-            if order_book_data['askTotal'] == 0 and order_book_data['bidTotal'] == 0:
-                order_book_data = self.get_order_book_from_table()
             
             # 完全な板情報をorder_book_dataに追加
             if full_ask_total is not None and full_bid_total is not None:
@@ -506,61 +532,6 @@ class CoinglassScraperFinal:
             self.logger.error(traceback.format_exc())
             return None
 
-    def get_order_book_from_table(self):
-        """テーブル構造から板情報を取得（代替方法）"""
-        try:
-            # 現在価格を取得
-            current_price = self.get_current_price()
-            
-            ask_total = 0
-            bid_total = 0
-            ask_count = 0
-            bid_count = 0
-            
-            # XPathで価格と数量を取得
-            price_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'obv2-item-price')]")
-            amount_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'obv2-item-amount')]")
-            
-            # 価格と数量のペアを作成
-            for i in range(min(len(price_elements), len(amount_elements))):
-                try:
-                    price_text = price_elements[i].text.strip()
-                    amount_text = amount_elements[i].text.strip()
-                    
-                    if price_text and amount_text:
-                        price = float(price_text.replace(',', ''))
-                        amount = float(amount_text.replace(',', ''))
-                        
-                        if price > current_price:
-                            ask_total += amount
-                            ask_count += 1
-                        elif price < current_price:
-                            bid_total += amount
-                            bid_count += 1
-                except:
-                    continue
-            
-            return {
-                'askTotal': ask_total,
-                'bidTotal': bid_total,
-                'askCount': ask_count,
-                'bidCount': bid_count,
-                'currentPrice': current_price,
-                'timestamp': datetime.now().isoformat(),
-                'method': 'table'
-            }
-            
-        except Exception as e:
-            self.logger.error(f"テーブル抽出エラー: {str(e)}")
-            return {
-                'askTotal': 0,
-                'bidTotal': 0,
-                'askCount': 0,
-                'bidCount': 0,
-                'currentPrice': 0,
-                'timestamp': datetime.now().isoformat(),
-                'method': 'error'
-            }
 
     def close_driver(self):
         """ドライバーを閉じる"""
@@ -581,7 +552,6 @@ class ScraperGUIFinal:
         
         self.scraper = CoinglassScraperFinal()
         self.scraper_thread = None
-        self.data_history = []
         
         # グラフ用のデータ履歴（最大300点保持）
         self.max_history = 300
@@ -754,10 +724,6 @@ class ScraperGUIFinal:
                           f"現在価格={current_price:,.0f}")
             self.add_log(log_message)
             
-            # 履歴に追加
-            self.data_history.append(data)
-            if len(self.data_history) > 1000:  # 最新1000件のみ保持
-                self.data_history.pop(0)
             
             # グラフ用データを追加
             self.time_history.append(datetime.now())
@@ -877,7 +843,6 @@ class ScraperGUIFinal:
         self.time_history.clear()
         self.ask_history.clear()
         self.bid_history.clear()
-        self.data_history.clear()
         
         # グラフを初期状態に戻す
         self.ax_ask.clear()
