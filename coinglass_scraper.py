@@ -658,6 +658,10 @@ class ScraperGUIFinal:
                                        command=self.export_data, width=15)
         self.export_button.grid(row=0, column=3, padx=5)
         
+        self.clear_button = ttk.Button(control_frame, text="クリア", 
+                                      command=self.clear_all, width=15)
+        self.clear_button.grid(row=0, column=4, padx=5)
+        
         # 設定フレーム
         settings_frame = ttk.LabelFrame(main_frame, text="設定", padding="10")
         settings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
@@ -807,17 +811,27 @@ class ScraperGUIFinal:
             asks = list(self.ask_history)
             bids = list(self.bid_history)
             
+            # 共通のY軸範囲を計算
+            common_min = 0
+            common_max = 1
+            if asks and bids:
+                # 各板の最小値・最大値を取得
+                min_ask = min(asks)
+                min_bid = min(bids)
+                max_ask = max(asks)
+                max_bid = max(bids)
+                
+                # 共通の最小値（小さい方を採用）と最大値（大きい方を採用）
+                common_min = min(min_ask, min_bid) * 0.9  # 10%の余裕（下側）
+                common_max = max(max_ask, max_bid) * 1.1  # 10%の余裕（上側）
+            
             # 売り板グラフを更新
             self.ax_ask.clear()
             self.ax_ask.plot(times, asks, color='#ff6b6b', linewidth=2)
-            self.ax_ask.fill_between(times, asks, 0, color='#ff6b6b', alpha=0.3)
+            self.ax_ask.fill_between(times, asks, common_min, color='#ff6b6b', alpha=0.3)
             self.ax_ask.grid(True, alpha=0.2, color='#444444')
             self.ax_ask.set_facecolor('#1e1e1e')
-            
-            # 売り板の最大値を動的に設定
-            if asks:
-                max_ask = max(asks) * 1.1  # 10%の余裕を持たせる
-                self.ax_ask.set_ylim(0, max_ask)
+            self.ax_ask.set_ylim(common_min, common_max)
             
             # 売り板のY軸を反転（下向きに表示）
             self.ax_ask.invert_yaxis()
@@ -825,14 +839,10 @@ class ScraperGUIFinal:
             # 買い板グラフを更新
             self.ax_bid.clear()
             self.ax_bid.plot(times, bids, color='#51cf66', linewidth=2)
-            self.ax_bid.fill_between(times, bids, 0, color='#51cf66', alpha=0.3)
+            self.ax_bid.fill_between(times, bids, common_min, color='#51cf66', alpha=0.3)
             self.ax_bid.grid(True, alpha=0.2, color='#444444')
             self.ax_bid.set_facecolor('#1e1e1e')
-            
-            # 買い板の最大値を動的に設定
-            if bids:
-                max_bid = max(bids) * 1.1  # 10%の余裕を持たせる
-                self.ax_bid.set_ylim(0, max_bid)
+            self.ax_bid.set_ylim(common_min, common_max)
             
             # X軸の設定（時刻表示）
             for ax in [self.ax_ask, self.ax_bid]:
@@ -855,6 +865,35 @@ class ScraperGUIFinal:
             messagebox.showinfo("スクリーンショット", f"スクリーンショットを保存しました:\n{filename}")
         else:
             messagebox.showwarning("警告", "ドライバーが起動していません")
+    
+    def clear_all(self):
+        """ログとグラフをクリア"""
+        # ログをクリア
+        self.log_text.delete(1.0, tk.END)
+        self.add_log("ログとグラフをクリアしました")
+        
+        # グラフの履歴データをクリア
+        self.time_history.clear()
+        self.ask_history.clear()
+        self.bid_history.clear()
+        self.data_history.clear()
+        
+        # グラフを初期状態に戻す
+        self.ax_ask.clear()
+        self.ax_bid.clear()
+        
+        # グラフの初期設定を再適用
+        self.ax_ask.set_facecolor('#1e1e1e')
+        self.ax_ask.grid(True, alpha=0.2, color='#444444')
+        self.ax_ask.set_ylim(0, 1)
+        self.ax_ask.invert_yaxis()
+        
+        self.ax_bid.set_facecolor('#1e1e1e')
+        self.ax_bid.grid(True, alpha=0.2, color='#444444')
+        self.ax_bid.set_ylim(0, 1)
+        
+        # グラフを再描画
+        self.canvas.draw()
         
     def scraping_loop(self):
         """スクレイピングループ"""
