@@ -650,17 +650,9 @@ class ScraperGUIFinal:
                                      state='disabled', width=15)
         self.stop_button.grid(row=0, column=1, padx=5)
         
-        self.screenshot_button = ttk.Button(control_frame, text="スクリーンショット", 
-                                           command=self.take_screenshot, width=15)
-        self.screenshot_button.grid(row=0, column=2, padx=5)
-        
-        self.export_button = ttk.Button(control_frame, text="データエクスポート", 
-                                       command=self.export_data, width=15)
-        self.export_button.grid(row=0, column=3, padx=5)
-        
         self.clear_button = ttk.Button(control_frame, text="クリア", 
                                       command=self.clear_all, width=15)
-        self.clear_button.grid(row=0, column=4, padx=5)
+        self.clear_button.grid(row=0, column=2, padx=5)
         
         # 設定フレーム
         settings_frame = ttk.LabelFrame(main_frame, text="設定", padding="10")
@@ -856,15 +848,6 @@ class ScraperGUIFinal:
         except Exception as e:
             self.add_log(f"グラフ更新エラー: {str(e)}", "ERROR")
         
-    def take_screenshot(self):
-        """スクリーンショットを撮影"""
-        if self.scraper.driver:
-            filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            self.scraper.driver.save_screenshot(filename)
-            self.add_log(f"スクリーンショットを保存しました: {filename}")
-            messagebox.showinfo("スクリーンショット", f"スクリーンショットを保存しました:\n{filename}")
-        else:
-            messagebox.showwarning("警告", "ドライバーが起動していません")
     
     def clear_all(self):
         """ログとグラフをクリア"""
@@ -940,29 +923,6 @@ class ScraperGUIFinal:
         self.start_button.config(state='normal')
         self.stop_button.config(state='disabled')
         
-    def export_data(self):
-        """データをエクスポート"""
-        if self.data_history:
-            filename = f"order_book_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(self.data_history, f, indent=2, ensure_ascii=False)
-            
-            # CSV形式でもエクスポート
-            csv_filename = f"order_book_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            with open(csv_filename, 'w', encoding='utf-8') as f:
-                f.write("Timestamp,Current Price,Ask Total,Ask Count,Bid Total,Bid Count,Ratio\n")
-                for item in self.data_history:
-                    ratio = item['bidTotal'] / item['askTotal'] if item['askTotal'] > 0 else 0
-                    f.write(f"{item['timestamp']},{item.get('currentPrice', 0)},"
-                           f"{item['askTotal']},{item.get('askCount', 0)},"
-                           f"{item['bidTotal']},{item.get('bidCount', 0)},"
-                           f"{ratio:.3f}\n")
-            
-            self.add_log(f"データをエクスポートしました: {filename}, {csv_filename}")
-            messagebox.showinfo("エクスポート", 
-                              f"データをエクスポートしました:\n{filename}\n{csv_filename}")
-        else:
-            messagebox.showwarning("警告", "エクスポートするデータがありません")
         
     def on_closing(self):
         """アプリケーション終了時の処理"""
