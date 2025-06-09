@@ -106,6 +106,29 @@ class CoinglassScraperFinal:
             self.logger.error(traceback.format_exc())
             return False
 
+    def initialize_page(self, headless=False):
+        """初回のみ実行：ページを開いてグルーピングを設定"""
+        try:
+            if not self.driver:
+                if not self.setup_driver(headless=headless):
+                    return False
+            
+            # ページを読み込み
+            self.driver.get(self.url)
+            self.logger.info(f"ページにアクセス: {self.url}")
+            
+            # オーダーブックの読み込みを待機
+            if not self.wait_for_order_book():
+                return False
+            
+            self.logger.info("初期化が完了しました")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"ページ初期化エラー: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return False
+
     def wait_for_order_book(self):
         """オーダーブックの読み込みを待機"""
         try:
@@ -124,6 +147,9 @@ class CoinglassScraperFinal:
             
             # グルーピングを100に設定
             self.set_grouping_to_100()
+            
+            # グルーピング設定後、データが更新されるのを待つ
+            time.sleep(2)
             
             return True
         except TimeoutException:
@@ -378,15 +404,7 @@ class CoinglassScraperFinal:
         """売り板と買い板の総量を取得（実際の構造に基づく）"""
         try:
             if not self.driver:
-                if not self.setup_driver():
-                    return None
-            
-            # ページを読み込み
-            self.driver.get(self.url)
-            self.logger.info(f"ページにアクセス: {self.url}")
-            
-            # オーダーブックの読み込みを待機
-            if not self.wait_for_order_book():
+                self.logger.error("ドライバーが初期化されていません")
                 return None
             
             # 現在価格を取得
@@ -887,16 +905,36 @@ class ScraperGUIFinal:
         if headless:
             self.add_log("ヘッドレスモードで実行中")
         
-        # ドライバーを初期化
-        if not self.scraper.setup_driver(headless=headless):
-            self.add_log("ドライバーの初期化に失敗しました", "ERROR")
+        # 初回のみページを読み込みとグルーピング設定（ドライバー初期化も含む）
+        self.add_log("ページを初期化中...")
+        if not self.scraper.initialize_page(headless=headless):
+            self.add_log("ページの初期化に失敗しました", "ERROR")
             self.stop_scraping()
             return
         
+        self.add_log("初期化完了。データ取得を開始します")
+        
+        # データ取得ループ
+        error_count = 0
         while self.scraper.is_running:
             try:
                 data = self.scraper.get_order_book_data()
-                self.root.after(0, self.update_display, data)
+                if data:
+                    self.root.after(0, self.update_display, data)
+                    error_count = 0  # 成功したらエラーカウントをリセット
+                else:
+                    self.add_log("データ取得に失敗しました", "WARNING")
+                    error_count += 1
+                    
+                    # 3回連続で失敗したら再初期化を試みる
+                    if error_count >= 3:
+                        self.add_log("連続エラーのため、ページを再初期化します", "WARNING")
+                        if self.scraper.initialize_page(headless=headless):
+                            self.add_log("再初期化に成功しました")
+                            error_count = 0
+                        else:
+                            self.add_log("再初期化に失敗しました", "ERROR")
+                            time.sleep(10)  # 再初期化失敗時は長めに待機
                 
                 # 指定された間隔で待機
                 interval = int(self.interval_var.get())
@@ -904,6 +942,15 @@ class ScraperGUIFinal:
                 
             except Exception as e:
                 self.add_log(f"エラー: {str(e)}", "ERROR")
+                error_count += 1
+                
+                # セッション切れやページエラーの可能性がある場合
+                if "StaleElementReferenceException" in str(e) or "session" in str(e).lower():
+                    self.add_log("セッションエラーのため、ページを再初期化します", "WARNING")
+                    if self.scraper.initialize_page(headless=headless):
+                        self.add_log("再初期化に成功しました")
+                        error_count = 0
+                
                 time.sleep(5)
         
         self.add_log("スクレイピングを停止しました")
