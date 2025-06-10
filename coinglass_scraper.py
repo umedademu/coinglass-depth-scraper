@@ -793,9 +793,12 @@ class ScraperGUIFinal:
             asks = list(self.ask_history)
             bids = list(self.bid_history)
             
-            # 共通のY軸範囲を計算
-            common_min = 0
-            common_max = 1
+            # 各グラフのY軸範囲を計算
+            ask_min = 0
+            ask_max = 1
+            bid_min = 0
+            bid_max = 1
+            
             if asks and bids:
                 # 各板の最小値・最大値を取得
                 min_ask = min(asks)
@@ -803,17 +806,26 @@ class ScraperGUIFinal:
                 max_ask = max(asks)
                 max_bid = max(bids)
                 
-                # 共通の最小値（小さい方を採用）と最大値（大きい方を採用）
-                common_min = min(min_ask, min_bid)
-                common_max = max(max_ask, max_bid)
+                # 各板の変動幅を計算
+                ask_range = max_ask - min_ask
+                bid_range = max_bid - min_bid
+                
+                # より大きい幅を共通幅として採用（最小幅を設定）
+                common_range = max(ask_range, bid_range, 1.0)  # 最小幅1.0を保証
+                
+                # 各グラフの表示範囲を設定（自身の最小値から共通幅分）
+                ask_min = min_ask
+                ask_max = min_ask + common_range
+                bid_min = min_bid
+                bid_max = min_bid + common_range
             
             # 売り板グラフを更新
             self.ax_ask.clear()
             self.ax_ask.plot(times, asks, color='#ff6b6b', linewidth=2)
-            self.ax_ask.fill_between(times, asks, common_min, color='#ff6b6b', alpha=0.3)
+            self.ax_ask.fill_between(times, asks, ask_min, color='#ff6b6b', alpha=0.3)
             self.ax_ask.grid(True, alpha=0.2, color='#444444')
             self.ax_ask.set_facecolor('#1e1e1e')
-            self.ax_ask.set_ylim(common_min, common_max)
+            self.ax_ask.set_ylim(ask_min, ask_max)
             
             # 売り板のY軸を反転（下向きに表示）
             self.ax_ask.invert_yaxis()
@@ -821,10 +833,10 @@ class ScraperGUIFinal:
             # 買い板グラフを更新
             self.ax_bid.clear()
             self.ax_bid.plot(times, bids, color='#51cf66', linewidth=2)
-            self.ax_bid.fill_between(times, bids, common_min, color='#51cf66', alpha=0.3)
+            self.ax_bid.fill_between(times, bids, bid_min, color='#51cf66', alpha=0.3)
             self.ax_bid.grid(True, alpha=0.2, color='#444444')
             self.ax_bid.set_facecolor('#1e1e1e')
-            self.ax_bid.set_ylim(common_min, common_max)
+            self.ax_bid.set_ylim(bid_min, bid_max)
             
             # X軸の設定（1時間ごとの時刻表示）
             for ax in [self.ax_ask, self.ax_bid]:
