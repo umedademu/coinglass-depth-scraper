@@ -118,6 +118,14 @@ class CoinglassScraperFinal:
             self.driver.get(self.url)
             self.logger.info(f"ページにアクセス: {self.url}")
             
+            # ページの基本的な読み込みを待つ
+            WebDriverWait(self.driver, 30).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+            
+            # グルーピングを100に設定（オーダーブック表示前）
+            self.set_grouping_to_100()
+            
             # オーダーブックの読み込みを待機
             if not self.wait_for_order_book():
                 return False
@@ -133,23 +141,12 @@ class CoinglassScraperFinal:
     def wait_for_order_book(self):
         """オーダーブックの読み込みを待機"""
         try:
-            # ページの基本的な読み込みを待つ
-            WebDriverWait(self.driver, 30).until(
-                lambda driver: driver.execute_script("return document.readyState") == "complete"
-            )
-            
             # オーダーブックの要素が表示されるまで待つ
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "obv2-item"))
             )
             
-            # データが読み込まれるまで少し待つ
-            time.sleep(3)
-            
-            # グルーピングを100に設定
-            self.set_grouping_to_100()
-            
-            # グルーピング設定後、データが更新されるのを待つ
+            # データが安定するまで少し待つ
             time.sleep(2)
             
             return True
@@ -737,6 +734,10 @@ class ScraperGUIFinal:
             
             # グラフを更新
             self.update_graph()
+            
+            # 前回値を更新
+            self.last_ask_total = full_ask_total
+            self.last_bid_total = full_bid_total
         else:
             self.add_log("データ取得に失敗しました（板情報が空です）", "WARNING")
     
@@ -812,6 +813,51 @@ class ScraperGUIFinal:
         
         # 初期グラフを描画
         self.canvas.draw()
+        
+        # 前回値を保持（最適値選定用）
+        self.last_ask_total = None
+        self.last_bid_total = None
+    
+    def select_best_values(self, data_list):
+        """3つの取得データから最適値を選定"""
+        if not data_list or len(data_list) == 0:
+            return None
+            
+        # すべてNoneの場合
+        valid_data = [d for d in data_list if d is not None]
+        if not valid_data:
+            return None
+            
+        # 前回値が存在しない場合（初回）
+        if self.last_ask_total is None or self.last_bid_total is None:
+            # 中央値を採用
+            ask_values = [d['fullAskTotal'] for d in valid_data if 'fullAskTotal' in d]
+            bid_values = [d['fullBidTotal'] for d in valid_data if 'fullBidTotal' in d]
+            
+            if ask_values and bid_values:
+                # 中央のインデックスのデータを返す
+                mid_index = len(valid_data) // 2
+                return valid_data[mid_index]
+            else:
+                return valid_data[-1]  # 最後のデータを返す
+        
+        # 前回値との差が最小のものを選定
+        best_data = None
+        min_diff = float('inf')
+        
+        for data in valid_data:
+            if 'fullAskTotal' not in data or 'fullBidTotal' not in data:
+                continue
+                
+            ask_diff = abs(data['fullAskTotal'] - self.last_ask_total)
+            bid_diff = abs(data['fullBidTotal'] - self.last_bid_total)
+            total_diff = ask_diff + bid_diff
+            
+            if total_diff < min_diff:
+                min_diff = total_diff
+                best_data = data
+        
+        return best_data
     
     def init_database(self):
         """SQLiteデータベースを初期化"""
@@ -1087,26 +1133,52 @@ class ScraperGUIFinal:
         error_count = 0
         while self.scraper.is_running:
             try:
-                data = self.scraper.get_order_book_data()
-                if data:
-                    self.root.after(0, self.update_display, data)
-                    error_count = 0  # 成功したらエラーカウントをリセット
-                else:
-                    self.add_log("データ取得に失敗しました", "WARNING")
-                    error_count += 1
-                    
-                    # 3回連続で失敗したら再初期化を試みる
-                    if error_count >= 3:
-                        self.add_log("連続エラーのため、ページを再初期化します", "WARNING")
-                        if self.scraper.initialize_page(headless=headless):
-                            self.add_log("再初期化に成功しました")
-                            error_count = 0
-                        else:
-                            self.add_log("再初期化に失敗しました", "ERROR")
-                            time.sleep(10)  # 再初期化失敗時は長めに待機
+                # 60秒サイクルの開始
+                cycle_start = time.time()
                 
-                # 60秒間隔で待機（固定）
-                time.sleep(60)
+                # 15秒待機
+                self.add_log("次のデータ取得まで待機中...")
+                time.sleep(15)
+                
+                # 3回取得（15秒、30秒、45秒）
+                data_list = []
+                for i in range(3):
+                    if not self.scraper.is_running:
+                        break
+                        
+                    self.add_log(f"データ取得 {i+1}/3 回目")
+                    data = self.scraper.get_order_book_data()
+                    data_list.append(data)
+                    
+                    # 最後の取得でなければ15秒待機
+                    if i < 2 and self.scraper.is_running:
+                        time.sleep(15)
+                
+                # 最適値を選定
+                if data_list:
+                    best_data = self.select_best_values(data_list)
+                    if best_data:
+                        self.root.after(0, self.update_display, best_data)
+                        error_count = 0
+                    else:
+                        self.add_log("有効なデータが取得できませんでした", "WARNING")
+                        error_count += 1
+                
+                # エラー処理
+                if error_count >= 3:
+                    self.add_log("連続エラーのため、ページを再初期化します", "WARNING")
+                    if self.scraper.initialize_page(headless=headless):
+                        self.add_log("再初期化に成功しました")
+                        error_count = 0
+                    else:
+                        self.add_log("再初期化に失敗しました", "ERROR")
+                        time.sleep(10)
+                
+                # 残り時間を待機（60秒サイクルを維持）
+                elapsed = time.time() - cycle_start
+                remaining = max(0, 60 - elapsed)
+                if remaining > 0 and self.scraper.is_running:
+                    time.sleep(remaining)
                 
             except Exception as e:
                 self.add_log(f"エラー: {str(e)}", "ERROR")
