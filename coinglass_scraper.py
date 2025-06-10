@@ -640,11 +640,11 @@ class ScraperGUIFinal:
         # 時間足選択
         ttk.Label(control_frame, text="時間足:", font=('Arial', 10)).grid(row=0, column=4, padx=5)
         self.timeframe_var = tk.StringVar(value="1分")
-        timeframe_values = ["1分", "3分", "5分", "15分", "30分", "1時間", "2時間", "4時間", "1日"]
-        timeframe_combo = ttk.Combobox(control_frame, textvariable=self.timeframe_var, 
-                                     values=timeframe_values, width=8, state="readonly")
-        timeframe_combo.grid(row=0, column=5, padx=5)
-        timeframe_combo.bind('<<ComboboxSelected>>', lambda e: self.update_graph())
+        self.all_timeframes = ["1分", "3分", "5分", "15分", "30分", "1時間", "2時間", "4時間", "1日"]
+        self.timeframe_combo = ttk.Combobox(control_frame, textvariable=self.timeframe_var, 
+                                     values=["1分"], width=8, state="readonly")  # 初期は1分のみ
+        self.timeframe_combo.grid(row=0, column=5, padx=5)
+        self.timeframe_combo.bind('<<ComboboxSelected>>', lambda e: self.update_graph())
         
         # ヘッドレスモード
         self.headless_var = tk.BooleanVar(value=True)
@@ -732,6 +732,9 @@ class ScraperGUIFinal:
             # データベースに保存
             self.save_to_database(now, full_ask_total, full_bid_total, current_price)
             
+            # 選択可能な時間足を更新
+            self.update_timeframe_options()
+            
             # グラフを更新
             self.update_graph()
         else:
@@ -743,6 +746,38 @@ class ScraperGUIFinal:
         log_entry = f"[{timestamp}] {level}: {message}\n"
         self.log_text.insert(tk.END, log_entry)
         self.log_text.see(tk.END)
+    
+    def update_timeframe_options(self):
+        """データ量に基づいて選択可能な時間足を更新"""
+        data_count = len(self.time_history)
+        
+        # 各時間足に必要な最小データ数（少なくとも2点は必要）
+        min_data_required = {
+            "1分": 2,
+            "3分": 3,
+            "5分": 5,
+            "15分": 15,
+            "30分": 30,
+            "1時間": 60,
+            "2時間": 120,
+            "4時間": 240,
+            "1日": 1440
+        }
+        
+        # 選択可能な時間足をフィルタリング
+        available_timeframes = []
+        for tf in self.all_timeframes:
+            if data_count >= min_data_required[tf]:
+                available_timeframes.append(tf)
+        
+        # コンボボックスの値を更新
+        current_selection = self.timeframe_var.get()
+        self.timeframe_combo['values'] = available_timeframes
+        
+        # 現在の選択が無効になった場合、最大の有効な時間足を選択
+        if current_selection not in available_timeframes and available_timeframes:
+            self.timeframe_var.set(available_timeframes[-1])
+            self.update_graph()
     
     def setup_graph(self):
         """グラフをセットアップ"""
@@ -870,6 +905,8 @@ class ScraperGUIFinal:
             
             if loaded_count > 0:
                 self.add_log(f"過去のデータを{loaded_count}件読み込みました")
+                # 選択可能な時間足を更新
+                self.update_timeframe_options()
                 # グラフを更新
                 self.update_graph()
             else:
@@ -916,6 +953,10 @@ class ScraperGUIFinal:
                 filtered_times = filtered_times[-300:]
                 filtered_asks = filtered_asks[-300:]
                 filtered_bids = filtered_bids[-300:]
+            
+            # フィルタリング後にデータが空の場合は処理をスキップ
+            if len(filtered_times) < 2:
+                return
             
             times = filtered_times
             asks = filtered_asks
@@ -1019,6 +1060,10 @@ class ScraperGUIFinal:
         
         # グラフを再描画
         self.canvas.draw()
+        
+        # 時間足選択を1分にリセット
+        self.timeframe_var.set("1分")
+        self.timeframe_combo['values'] = ["1分"]
         
     def scraping_loop(self):
         """スクレイピングループ"""
