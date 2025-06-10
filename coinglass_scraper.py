@@ -20,6 +20,7 @@ import logging
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from collections import deque
 import matplotlib.dates as mdates
 import traceback
@@ -34,7 +35,7 @@ class CoinglassScraperFinal:
     def __init__(self):
         self.driver = None
         self.is_running = False
-        self.update_interval = 5
+        self.update_interval = 60  # 固定60秒間隔
         self.url = "https://www.coinglass.com/ja/mergev2/BTC-USDT"
         self.last_valid_price = None  # 前回の有効な価格を保存
         
@@ -448,8 +449,6 @@ class CoinglassScraperFinal:
                 function getOrderBookData(currentPrice) {
                     let askTotal = 0;  // 売り板総量
                     let bidTotal = 0;  // 買い板総量
-                    let askCount = 0;
-                    let bidCount = 0;
                     
                     // すべての板情報要素を取得
                     const orderItems = document.querySelectorAll('.obv2-item');
@@ -474,11 +473,9 @@ class CoinglassScraperFinal:
                             if (price > currentPrice) {
                                 // 売り板（Ask）
                                 askTotal += amount;
-                                askCount++;
                             } else if (price < currentPrice) {
                                 // 買い板（Bid）
                                 bidTotal += amount;
-                                bidCount++;
                             }
                             
                             // クラス名でも判定（バックアップ）
@@ -498,8 +495,6 @@ class CoinglassScraperFinal:
                     return {
                         askTotal: askTotal,
                         bidTotal: bidTotal,
-                        askCount: askCount,
-                        bidCount: bidCount,
                         currentPrice: currentPrice,
                         totalItems: orderItems.length,
                         timestamp: new Date().toISOString()
@@ -521,9 +516,7 @@ class CoinglassScraperFinal:
                 order_book_data['fullBidTotal'] = order_book_data['bidTotal']
             
             self.logger.info(f"表示範囲のデータ: 売り板総量={order_book_data['askTotal']:.2f}, "
-                           f"買い板総量={order_book_data['bidTotal']:.2f}, "
-                           f"売り板数={order_book_data.get('askCount', 0)}, "
-                           f"買い板数={order_book_data.get('bidCount', 0)}")
+                           f"買い板総量={order_book_data['bidTotal']:.2f}")
             
             return order_book_data
             
@@ -553,11 +546,10 @@ class ScraperGUIFinal:
         self.scraper = CoinglassScraperFinal()
         self.scraper_thread = None
         
-        # グラフ用のデータ履歴（最大300点保持）
-        self.max_history = 300
-        self.time_history = deque(maxlen=self.max_history)
-        self.ask_history = deque(maxlen=self.max_history)
-        self.bid_history = deque(maxlen=self.max_history)
+        # グラフ用のデータ履歴（全データ保持）
+        self.time_history = []
+        self.ask_history = []
+        self.bid_history = []
         
         self.setup_ui()
         self.setup_graph()
@@ -594,8 +586,6 @@ class ScraperGUIFinal:
         ttk.Label(ask_frame, text="売板:", font=('Arial', 10)).pack(side=tk.LEFT)
         self.ask_label = ttk.Label(ask_frame, text="---", font=('Arial', 11, 'bold'), foreground='red')
         self.ask_label.pack(side=tk.LEFT, padx=5)
-        self.ask_count_label = ttk.Label(ask_frame, text="(0)", style='Small.TLabel')
-        self.ask_count_label.pack(side=tk.LEFT)
         
         # 買い板総量
         bid_frame = ttk.Frame(top_frame)
@@ -603,8 +593,6 @@ class ScraperGUIFinal:
         ttk.Label(bid_frame, text="買板:", font=('Arial', 10)).pack(side=tk.LEFT)
         self.bid_label = ttk.Label(bid_frame, text="---", font=('Arial', 11, 'bold'), foreground='green')
         self.bid_label.pack(side=tk.LEFT, padx=5)
-        self.bid_count_label = ttk.Label(bid_frame, text="(0)", style='Small.TLabel')
-        self.bid_count_label.pack(side=tk.LEFT)
         
         # 比率
         ratio_frame = ttk.Frame(top_frame)
@@ -643,12 +631,14 @@ class ScraperGUIFinal:
         # 区切り線
         ttk.Separator(control_frame, orient='vertical').grid(row=0, column=3, sticky='ns', padx=10)
         
-        # 更新間隔
-        ttk.Label(control_frame, text="更新間隔(秒):", font=('Arial', 10)).grid(row=0, column=4, padx=5)
-        self.interval_var = tk.StringVar(value="60")
-        interval_spinbox = ttk.Spinbox(control_frame, from_=1, to=60, width=8, 
-                                      textvariable=self.interval_var)
-        interval_spinbox.grid(row=0, column=5, padx=5)
+        # 時間足選択
+        ttk.Label(control_frame, text="時間足:", font=('Arial', 10)).grid(row=0, column=4, padx=5)
+        self.timeframe_var = tk.StringVar(value="1分")
+        timeframe_values = ["1分", "3分", "5分", "15分", "30分", "1時間", "2時間", "4時間", "1日"]
+        timeframe_combo = ttk.Combobox(control_frame, textvariable=self.timeframe_var, 
+                                     values=timeframe_values, width=8, state="readonly")
+        timeframe_combo.grid(row=0, column=5, padx=5)
+        timeframe_combo.bind('<<ComboboxSelected>>', lambda e: self.update_graph())
         
         # ヘッドレスモード
         self.headless_var = tk.BooleanVar(value=True)
@@ -691,8 +681,6 @@ class ScraperGUIFinal:
             ask_total = data.get('askTotal', 0)
             bid_total = data.get('bidTotal', 0)
             current_price = data.get('currentPrice', 0)
-            ask_count = data.get('askCount', 0)
-            bid_count = data.get('bidCount', 0)
             
             # 現在価格（小数点第1位まで表示）
             if current_price > 0:
@@ -704,8 +692,6 @@ class ScraperGUIFinal:
             
             self.ask_label.config(text=f"{full_ask_total:,.1f}")
             self.bid_label.config(text=f"{full_bid_total:,.1f}")
-            self.ask_count_label.config(text=f"({ask_count})")
-            self.bid_count_label.config(text=f"({bid_count})")
             
             # 比率と差額を計算（完全な板情報を使用）
             if full_ask_total > 0:
@@ -725,8 +711,8 @@ class ScraperGUIFinal:
             
             self.time_label.config(text=f"{datetime.now().strftime('%H:%M:%S')}")
             
-            log_message = (f"更新成功: 売り板={full_ask_total:,.2f}({ask_count}件), "
-                          f"買い板={full_bid_total:,.2f}({bid_count}件), "
+            log_message = (f"更新成功: 売り板={full_ask_total:,.2f}, "
+                          f"買い板={full_bid_total:,.2f}, "
                           f"現在価格={current_price:,.0f}")
             self.add_log(log_message)
             
@@ -788,10 +774,42 @@ class ScraperGUIFinal:
             return  # データが少なすぎる場合は更新しない
         
         try:
-            # 時間データをmatplotlib形式に変換
-            times = list(self.time_history)
-            asks = list(self.ask_history)
-            bids = list(self.bid_history)
+            # 時間足に応じたサンプリング間隔を設定
+            timeframe = self.timeframe_var.get()
+            timeframe_intervals = {
+                "1分": 1,
+                "3分": 3,
+                "5分": 5,
+                "15分": 15,
+                "30分": 30,
+                "1時間": 60,
+                "2時間": 120,
+                "4時間": 240,
+                "1日": 1440
+            }
+            interval = timeframe_intervals[timeframe]
+            
+            # データをフィルタリング（各時間足の最後のデータのみ採用）
+            filtered_times = []
+            filtered_asks = []
+            filtered_bids = []
+            
+            for i in range(len(self.time_history)):
+                # intervalごとに最後のデータのみ採用
+                if (i + 1) % interval == 0 or i == len(self.time_history) - 1:
+                    filtered_times.append(self.time_history[i])
+                    filtered_asks.append(self.ask_history[i])
+                    filtered_bids.append(self.bid_history[i])
+            
+            # 最大300点に制限
+            if len(filtered_times) > 300:
+                filtered_times = filtered_times[-300:]
+                filtered_asks = filtered_asks[-300:]
+                filtered_bids = filtered_bids[-300:]
+            
+            times = filtered_times
+            asks = filtered_asks
+            bids = filtered_bids
             
             # 各グラフのY軸範囲を計算
             ask_min = 0
@@ -838,12 +856,24 @@ class ScraperGUIFinal:
             self.ax_bid.set_facecolor('#1e1e1e')
             self.ax_bid.set_ylim(bid_min, bid_max)
             
-            # X軸の設定（1時間ごとの時刻表示）
+            # X軸の設定（時間足に応じた表示）
             for ax in [self.ax_ask, self.ax_bid]:
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H'))  # 0-23の時間のみ表示
-                ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))  # 1時間ごとに目盛り
-                ax.xaxis.set_minor_locator(mdates.MinuteLocator(interval=15))  # 15分ごとの補助目盛り（表示なし）
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center')  # 回転なし、中央揃え
+                if timeframe in ["1分", "3分", "5分", "15分", "30分"]:
+                    # 分足の場合は時:分表示
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+                    if len(filtered_times) > 20:
+                        # データが多い場合は間引いて表示
+                        ax.xaxis.set_major_locator(MaxNLocator(10))
+                elif timeframe in ["1時間", "2時間", "4時間"]:
+                    # 時間足の場合は時間表示
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H'))
+                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, interval // 60)))
+                else:  # 1日
+                    # 日足の場合は月/日表示
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
             
             # グラフを再描画
             self.canvas.draw()
@@ -859,9 +889,9 @@ class ScraperGUIFinal:
         self.add_log("ログとグラフをクリアしました")
         
         # グラフの履歴データをクリア
-        self.time_history.clear()
-        self.ask_history.clear()
-        self.bid_history.clear()
+        self.time_history = []
+        self.ask_history = []
+        self.bid_history = []
         
         # グラフを初期状態に戻す
         self.ax_ask.clear()
@@ -920,9 +950,8 @@ class ScraperGUIFinal:
                             self.add_log("再初期化に失敗しました", "ERROR")
                             time.sleep(10)  # 再初期化失敗時は長めに待機
                 
-                # 指定された間隔で待機
-                interval = int(self.interval_var.get())
-                time.sleep(interval)
+                # 60秒間隔で待機（固定）
+                time.sleep(60)
                 
             except Exception as e:
                 self.add_log(f"エラー: {str(e)}", "ERROR")
