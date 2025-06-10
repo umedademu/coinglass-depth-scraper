@@ -566,114 +566,120 @@ class ScraperGUIFinal:
         """UIのセットアップ"""
         # スタイル設定
         style = ttk.Style()
-        style.configure('Title.TLabel', font=('Arial', 18, 'bold'))
-        style.configure('Value.TLabel', font=('Arial', 16, 'bold'))
-        style.configure('Small.TLabel', font=('Arial', 10))
+        style.configure('Title.TLabel', font=('Arial', 14, 'bold'))
+        style.configure('Value.TLabel', font=('Arial', 12, 'bold'))
+        style.configure('Small.TLabel', font=('Arial', 9))
         
         # メインフレーム
-        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame = ttk.Frame(self.root, padding="5")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # タイトル
-        title_label = ttk.Label(main_frame, text="BTC-USDT Order Book Monitor", 
-                               style='Title.TLabel')
-        title_label.grid(row=0, column=0, columnspan=3, pady=10)
+        # 1行目: タイトルと板情報を横一列に配置
+        top_frame = ttk.Frame(main_frame)
+        top_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
         
-        # 現在の値を表示するフレーム
-        value_frame = ttk.LabelFrame(main_frame, text="板情報", padding="15")
-        value_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        # タイトル
+        ttk.Label(top_frame, text="BTC-USDT", style='Title.TLabel').grid(row=0, column=0, padx=10)
         
         # 現在価格
-        price_frame = ttk.Frame(value_frame)
-        price_frame.grid(row=0, column=0, columnspan=2, pady=5)
-        ttk.Label(price_frame, text="現在価格:", font=('Arial', 12)).pack(side=tk.LEFT)
-        self.price_label = ttk.Label(price_frame, text="---", font=('Arial', 14, 'bold'))
-        self.price_label.pack(side=tk.LEFT, padx=10)
+        price_frame = ttk.Frame(top_frame)
+        price_frame.grid(row=0, column=1, padx=10)
+        ttk.Label(price_frame, text="価格:", font=('Arial', 10)).pack(side=tk.LEFT)
+        self.price_label = ttk.Label(price_frame, text="---", font=('Arial', 11, 'bold'))
+        self.price_label.pack(side=tk.LEFT, padx=5)
         
         # 売り板総量
-        ask_frame = ttk.Frame(value_frame)
-        ask_frame.grid(row=1, column=0, padx=20, pady=5)
-        ttk.Label(ask_frame, text="売り板総量:", font=('Arial', 12)).pack()
-        self.ask_label = ttk.Label(ask_frame, text="---", style='Value.TLabel', foreground='red')
-        self.ask_label.pack()
-        self.ask_count_label = ttk.Label(ask_frame, text="(0件)", style='Small.TLabel')
-        self.ask_count_label.pack()
+        ask_frame = ttk.Frame(top_frame)
+        ask_frame.grid(row=0, column=2, padx=10)
+        ttk.Label(ask_frame, text="売板:", font=('Arial', 10)).pack(side=tk.LEFT)
+        self.ask_label = ttk.Label(ask_frame, text="---", font=('Arial', 11, 'bold'), foreground='red')
+        self.ask_label.pack(side=tk.LEFT, padx=5)
+        self.ask_count_label = ttk.Label(ask_frame, text="(0)", style='Small.TLabel')
+        self.ask_count_label.pack(side=tk.LEFT)
         
         # 買い板総量
-        bid_frame = ttk.Frame(value_frame)
-        bid_frame.grid(row=1, column=1, padx=20, pady=5)
-        ttk.Label(bid_frame, text="買い板総量:", font=('Arial', 12)).pack()
-        self.bid_label = ttk.Label(bid_frame, text="---", style='Value.TLabel', foreground='green')
-        self.bid_label.pack()
-        self.bid_count_label = ttk.Label(bid_frame, text="(0件)", style='Small.TLabel')
-        self.bid_count_label.pack()
+        bid_frame = ttk.Frame(top_frame)
+        bid_frame.grid(row=0, column=3, padx=10)
+        ttk.Label(bid_frame, text="買板:", font=('Arial', 10)).pack(side=tk.LEFT)
+        self.bid_label = ttk.Label(bid_frame, text="---", font=('Arial', 11, 'bold'), foreground='green')
+        self.bid_label.pack(side=tk.LEFT, padx=5)
+        self.bid_count_label = ttk.Label(bid_frame, text="(0)", style='Small.TLabel')
+        self.bid_count_label.pack(side=tk.LEFT)
         
-        # 比率と差額
-        ratio_frame = ttk.Frame(value_frame)
-        ratio_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        # 比率
+        ratio_frame = ttk.Frame(top_frame)
+        ratio_frame.grid(row=0, column=4, padx=10)
+        ttk.Label(ratio_frame, text="比率:", font=('Arial', 10)).pack(side=tk.LEFT)
+        self.ratio_label = ttk.Label(ratio_frame, text="---", font=('Arial', 11, 'bold'))
+        self.ratio_label.pack(side=tk.LEFT, padx=5)
         
-        ttk.Label(ratio_frame, text="買い/売り比率:", font=('Arial', 12)).pack(side=tk.LEFT)
-        self.ratio_label = ttk.Label(ratio_frame, text="---", font=('Arial', 14, 'bold'))
-        self.ratio_label.pack(side=tk.LEFT, padx=10)
-        
-        ttk.Label(ratio_frame, text="差枚:", font=('Arial', 12)).pack(side=tk.LEFT, padx=20)
-        self.diff_label = ttk.Label(ratio_frame, text="---", font=('Arial', 14, 'bold'))
-        self.diff_label.pack(side=tk.LEFT, padx=10)
+        # 差枚
+        diff_frame = ttk.Frame(top_frame)
+        diff_frame.grid(row=0, column=5, padx=10)
+        ttk.Label(diff_frame, text="差枚:", font=('Arial', 10)).pack(side=tk.LEFT)
+        self.diff_label = ttk.Label(diff_frame, text="---", font=('Arial', 11, 'bold'))
+        self.diff_label.pack(side=tk.LEFT, padx=5)
         
         # 最終更新時刻
-        info_frame = ttk.Frame(value_frame)
-        info_frame.grid(row=3, column=0, columnspan=2, pady=5)
-        self.time_label = ttk.Label(info_frame, text="最終更新: ---", font=('Arial', 10))
-        self.time_label.pack()
+        self.time_label = ttk.Label(top_frame, text="---", font=('Arial', 9))
+        self.time_label.grid(row=0, column=6, padx=10)
         
-        # コントロールボタン
+        # 2行目: コントロールボタンと設定を横一列に配置
         control_frame = ttk.Frame(main_frame)
-        control_frame.grid(row=2, column=0, columnspan=3, pady=10)
+        control_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
         
         self.start_button = ttk.Button(control_frame, text="開始", command=self.start_scraping,
-                                      width=15)
+                                      width=10)
         self.start_button.grid(row=0, column=0, padx=5)
         
         self.stop_button = ttk.Button(control_frame, text="停止", command=self.stop_scraping, 
-                                     state='disabled', width=15)
+                                     state='disabled', width=10)
         self.stop_button.grid(row=0, column=1, padx=5)
         
         self.clear_button = ttk.Button(control_frame, text="クリア", 
-                                      command=self.clear_all, width=15)
+                                      command=self.clear_all, width=10)
         self.clear_button.grid(row=0, column=2, padx=5)
         
-        # 設定フレーム
-        settings_frame = ttk.LabelFrame(main_frame, text="設定", padding="10")
-        settings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        # 区切り線
+        ttk.Separator(control_frame, orient='vertical').grid(row=0, column=3, sticky='ns', padx=10)
         
-        ttk.Label(settings_frame, text="更新間隔(秒):").grid(row=0, column=0, padx=5)
-        self.interval_var = tk.StringVar(value="5")
-        interval_spinbox = ttk.Spinbox(settings_frame, from_=1, to=60, width=10, 
+        # 更新間隔
+        ttk.Label(control_frame, text="更新間隔(秒):", font=('Arial', 10)).grid(row=0, column=4, padx=5)
+        self.interval_var = tk.StringVar(value="60")
+        interval_spinbox = ttk.Spinbox(control_frame, from_=1, to=60, width=8, 
                                       textvariable=self.interval_var)
-        interval_spinbox.grid(row=0, column=1, padx=5)
+        interval_spinbox.grid(row=0, column=5, padx=5)
         
-        self.headless_var = tk.BooleanVar(value=False)
-        headless_check = ttk.Checkbutton(settings_frame, text="ヘッドレスモード", 
+        # ヘッドレスモード
+        self.headless_var = tk.BooleanVar(value=True)
+        headless_check = ttk.Checkbutton(control_frame, text="ヘッドレスモード", 
                                         variable=self.headless_var)
-        headless_check.grid(row=0, column=2, padx=20)
+        headless_check.grid(row=0, column=6, padx=10)
         
-        # グラフ表示エリア
-        self.graph_frame = ttk.LabelFrame(main_frame, text="板推移グラフ", padding="5")
-        self.graph_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        # PanedWindowを作成（縦分割、サイズ調整可能）
+        paned_window = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
+        paned_window.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         
-        # ログ表示エリア（高さを調整）
-        log_frame = ttk.LabelFrame(main_frame, text="ログ", padding="5")
-        log_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        # グラフ表示エリア（拡大）
+        self.graph_frame = ttk.LabelFrame(padding="5")
+        self.graph_frame.configure(text="板推移グラフ")
         
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, width=110)
+        # ログ表示エリア
+        log_frame = ttk.LabelFrame(padding="5")
+        log_frame.configure(text="ログ")
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=6, width=110)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # PanedWindowにグラフとログを追加
+        paned_window.add(self.graph_frame, weight=3)  # グラフは重み3
+        paned_window.add(log_frame, weight=1)  # ログは重み1
         
         # グリッドの重み設定
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(4, weight=2)  # グラフに重みを設定
-        main_frame.rowconfigure(5, weight=1)  # ログに重みを設定
+        main_frame.rowconfigure(2, weight=1)  # PanedWindowに重みを設定
         self.graph_frame.columnconfigure(0, weight=1)
         self.graph_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
@@ -696,10 +702,10 @@ class ScraperGUIFinal:
             full_ask_total = data.get('fullAskTotal', ask_total)
             full_bid_total = data.get('fullBidTotal', bid_total)
             
-            self.ask_label.config(text=f"{full_ask_total:,.2f}")
-            self.bid_label.config(text=f"{full_bid_total:,.2f}")
-            self.ask_count_label.config(text=f"({ask_count}件)")
-            self.bid_count_label.config(text=f"({bid_count}件)")
+            self.ask_label.config(text=f"{full_ask_total:,.1f}")
+            self.bid_label.config(text=f"{full_bid_total:,.1f}")
+            self.ask_count_label.config(text=f"({ask_count})")
+            self.bid_count_label.config(text=f"({bid_count})")
             
             # 比率と差額を計算（完全な板情報を使用）
             if full_ask_total > 0:
@@ -717,7 +723,7 @@ class ScraperGUIFinal:
             else:
                 self.diff_label.config(foreground='red')
             
-            self.time_label.config(text=f"最終更新: {datetime.now().strftime('%H:%M:%S')}")
+            self.time_label.config(text=f"{datetime.now().strftime('%H:%M:%S')}")
             
             log_message = (f"更新成功: 売り板={full_ask_total:,.2f}({ask_count}件), "
                           f"買い板={full_bid_total:,.2f}({bid_count}件), "
