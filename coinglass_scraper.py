@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -29,6 +29,7 @@ import sys
 import platform
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import sqlite3
 
 
 class CoinglassScraperFinal:
@@ -554,6 +555,11 @@ class ScraperGUIFinal:
         self.setup_ui()
         self.setup_graph()
         
+        # データベースの初期化
+        self.init_database()
+        # 既存データの読み込み
+        self.load_historical_data()
+        
     def setup_ui(self):
         """UIのセットアップ"""
         # スタイル設定
@@ -718,9 +724,13 @@ class ScraperGUIFinal:
             
             
             # グラフ用データを追加
-            self.time_history.append(datetime.now())
+            now = datetime.now()
+            self.time_history.append(now)
             self.ask_history.append(full_ask_total)
             self.bid_history.append(full_bid_total)
+            
+            # データベースに保存
+            self.save_to_database(now, full_ask_total, full_bid_total, current_price)
             
             # グラフを更新
             self.update_graph()
@@ -767,6 +777,106 @@ class ScraperGUIFinal:
         
         # 初期グラフを描画
         self.canvas.draw()
+    
+    def init_database(self):
+        """SQLiteデータベースを初期化"""
+        try:
+            self.db_path = "btc_usdt_order_book.db"
+            # スレッドセーフな接続を作成
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            cursor = self.conn.cursor()
+            
+            # テーブルの作成
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS order_book_history (
+                    timestamp TEXT PRIMARY KEY,
+                    ask_total REAL NOT NULL,
+                    bid_total REAL NOT NULL,
+                    price REAL NOT NULL
+                )
+            """)
+            
+            # インデックスの作成（高速化のため）
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_timestamp 
+                ON order_book_history(timestamp)
+            """)
+            
+            self.conn.commit()
+            self.add_log("データベースを初期化しました")
+            
+        except Exception as e:
+            self.add_log(f"データベース初期化エラー: {str(e)}", "ERROR")
+            
+    def save_to_database(self, timestamp, ask_total, bid_total, price):
+        """データをデータベースに保存"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO order_book_history 
+                (timestamp, ask_total, bid_total, price)
+                VALUES (?, ?, ?, ?)
+            """, (timestamp.isoformat(), ask_total, bid_total, price))
+            
+            self.conn.commit()
+            
+            # 300日以上前のデータを削除
+            cutoff_date = (datetime.now() - timedelta(days=300)).isoformat()
+            cursor.execute("""
+                DELETE FROM order_book_history 
+                WHERE timestamp < ?
+            """, (cutoff_date,))
+            
+            self.conn.commit()
+            
+        except Exception as e:
+            self.add_log(f"データ保存エラー: {str(e)}", "ERROR")
+            # 3回までリトライ
+            for i in range(3):
+                try:
+                    time.sleep(0.1)
+                    self.conn.commit()
+                    break
+                except:
+                    if i == 2:
+                        self.add_log("データ保存に失敗しました", "ERROR")
+                        
+    def load_historical_data(self):
+        """起動時に過去のデータを読み込む"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # 最新の432,000件（300日分）を取得
+            cursor.execute("""
+                SELECT timestamp, ask_total, bid_total, price
+                FROM order_book_history
+                ORDER BY timestamp DESC
+                LIMIT 432000
+            """)
+            
+            # 古い順に並び替えて履歴に追加
+            rows = cursor.fetchall()
+            rows.reverse()
+            
+            loaded_count = 0
+            for row in rows:
+                timestamp_str, ask_total, bid_total, price = row
+                timestamp = datetime.fromisoformat(timestamp_str)
+                
+                self.time_history.append(timestamp)
+                self.ask_history.append(ask_total)
+                self.bid_history.append(bid_total)
+                loaded_count += 1
+            
+            if loaded_count > 0:
+                self.add_log(f"過去のデータを{loaded_count}件読み込みました")
+                # グラフを更新
+                self.update_graph()
+            else:
+                self.add_log("過去のデータはありません")
+                
+        except Exception as e:
+            self.add_log(f"データ読み込みエラー: {str(e)}", "ERROR")
     
     def update_graph(self):
         """グラフを更新"""
@@ -988,6 +1098,15 @@ class ScraperGUIFinal:
         """アプリケーション終了時の処理"""
         self.scraper.is_running = False
         self.scraper.close_driver()
+        
+        # データベース接続を閉じる
+        try:
+            if hasattr(self, 'conn'):
+                self.conn.close()
+                self.add_log("データベース接続を閉じました")
+        except Exception as e:
+            print(f"データベースクローズエラー: {str(e)}")
+            
         self.root.destroy()
         
     def run(self):
