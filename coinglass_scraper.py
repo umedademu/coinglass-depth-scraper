@@ -819,7 +819,7 @@ class ScraperGUIFinal:
         self.last_bid_total = None
     
     def select_best_values(self, data_list):
-        """3つの取得データから最適値を選定"""
+        """3つの取得データから最適値を選定（最大値を採用）"""
         if not data_list or len(data_list) == 0:
             return None
             
@@ -828,34 +828,24 @@ class ScraperGUIFinal:
         if not valid_data:
             return None
             
-        # 前回値が存在しない場合（初回）
-        if self.last_ask_total is None or self.last_bid_total is None:
-            # 中央値を採用
-            ask_values = [d['fullAskTotal'] for d in valid_data if 'fullAskTotal' in d]
-            bid_values = [d['fullBidTotal'] for d in valid_data if 'fullBidTotal' in d]
-            
-            if ask_values and bid_values:
-                # 中央のインデックスのデータを返す
-                mid_index = len(valid_data) // 2
-                return valid_data[mid_index]
-            else:
-                return valid_data[-1]  # 最後のデータを返す
-        
-        # 前回値との差が最小のものを選定
+        # 各データのfullAskTotalとfullBidTotalの合計を計算し、最大のものを選定
         best_data = None
-        min_diff = float('inf')
+        max_total = -1
         
         for data in valid_data:
             if 'fullAskTotal' not in data or 'fullBidTotal' not in data:
                 continue
                 
-            ask_diff = abs(data['fullAskTotal'] - self.last_ask_total)
-            bid_diff = abs(data['fullBidTotal'] - self.last_bid_total)
-            total_diff = ask_diff + bid_diff
+            # 売り板と買い板の合計値
+            total = data['fullAskTotal'] + data['fullBidTotal']
             
-            if total_diff < min_diff:
-                min_diff = total_diff
+            if total > max_total:
+                max_total = total
                 best_data = data
+        
+        # 最大値のデータが見つかった場合はログ出力
+        if best_data:
+            self.add_log(f"3回の取得から最大値を選定: 売り板={best_data['fullAskTotal']:.2f}, 買い板={best_data['fullBidTotal']:.2f}")
         
         return best_data
     
