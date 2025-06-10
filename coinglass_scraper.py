@@ -804,8 +804,8 @@ class ScraperGUIFinal:
                 max_bid = max(bids)
                 
                 # 共通の最小値（小さい方を採用）と最大値（大きい方を採用）
-                common_min = min(min_ask, min_bid) * 0.9  # 10%の余裕（下側）
-                common_max = max(max_ask, max_bid) * 1.1  # 10%の余裕（上側）
+                common_min = min(min_ask, min_bid)
+                common_max = max(max_ask, max_bid)
             
             # 売り板グラフを更新
             self.ax_ask.clear()
@@ -826,11 +826,12 @@ class ScraperGUIFinal:
             self.ax_bid.set_facecolor('#1e1e1e')
             self.ax_bid.set_ylim(common_min, common_max)
             
-            # X軸の設定（時刻表示）
+            # X軸の設定（1時間ごとの時刻表示）
             for ax in [self.ax_ask, self.ax_bid]:
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-                ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H'))  # 0-23の時間のみ表示
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))  # 1時間ごとに目盛り
+                ax.xaxis.set_minor_locator(mdates.MinuteLocator(interval=15))  # 15分ごとの補助目盛り（表示なし）
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center')  # 回転なし、中央揃え
             
             # グラフを再描画
             self.canvas.draw()
