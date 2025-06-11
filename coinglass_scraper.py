@@ -1043,24 +1043,41 @@ class ScraperGUIFinal:
             self.ax_bid.set_facecolor('#1e1e1e')
             self.ax_bid.set_ylim(bid_min, bid_max)
             
-            # X軸の設定（時間足に応じた表示）
+            # X軸の設定（最大30ラベル、0時は月/日表示）
             for ax in [self.ax_ask, self.ax_bid]:
-                if timeframe in ["1分", "3分", "5分", "15分", "30分"]:
-                    # 分足の場合は時:分表示
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-                    if len(filtered_times) > 20:
-                        # データが多い場合は間引いて表示
-                        ax.xaxis.set_major_locator(MaxNLocator(10))
-                elif timeframe in ["1時間", "2時間", "4時間"]:
-                    # 時間足の場合は時間表示
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H'))
-                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, interval // 60)))
-                else:  # 1日
-                    # 日足の場合は月/日表示
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+                # データ点数から間引き間隔を計算（最大30ラベル）
+                max_labels = 30
+                data_count = len(filtered_times)
+                skip_interval = max(1, data_count // max_labels)
                 
-                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                # 表示するティックの位置とラベルを準備
+                tick_positions = []
+                tick_labels = []
+                
+                for i in range(0, data_count, skip_interval):
+                    if i < data_count:
+                        tick_positions.append(filtered_times[i])
+                        time_obj = filtered_times[i]
+                        
+                        # 日足の場合はすべて月/日表示
+                        if timeframe == "1日":
+                            tick_labels.append(f"{time_obj.month}/{time_obj.day}")
+                        else:
+                            # 0時の場合は月/日表示、それ以外は時間のみ
+                            if time_obj.hour == 0 and time_obj.minute == 0:
+                                tick_labels.append(f"{time_obj.month}/{time_obj.day}")
+                            else:
+                                tick_labels.append(f"{time_obj.hour}")
+                
+                # カスタムティックを設定
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels)
+                
+                # ラベルの回転（必要に応じて）
+                if timeframe == "1日" or data_count > 100:
+                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                else:
+                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center')
             
             # グラフを再描画
             self.canvas.draw()
