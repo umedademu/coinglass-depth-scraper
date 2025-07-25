@@ -45,8 +45,7 @@ class CoinglassScraperFinal:
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('coinglass_scraper_final.log', encoding='utf-8'),
-                logging.StreamHandler()
+                logging.FileHandler('coinglass_scraper_final.log', encoding='utf-8')
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -1229,7 +1228,8 @@ class ScraperGUIFinal:
                 self.conn.close()
                 self.add_log("データベース接続を閉じました")
         except Exception as e:
-            print(f"データベースクローズエラー: {str(e)}")
+            # print(f"データベースクローズエラー: {str(e)}")
+            pass
             
         self.root.destroy()
         

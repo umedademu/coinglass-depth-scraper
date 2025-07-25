@@ -14,6 +14,6 @@ if exist "venv" (
 
 REM アプリケーションを実行
 echo アプリケーションを起動しています...
-python coinglass_scraper.py
+pythonw coinglass_scraper.py
 
 pause
