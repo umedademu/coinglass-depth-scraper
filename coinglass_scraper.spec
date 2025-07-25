@@ -19,7 +19,10 @@ a = Analysis(
         'webdriver_manager',
         'webdriver_manager.chrome',
         'sqlite3',
-        'PIL._tkinter_finder'
+        'PIL._tkinter_finder',
+        'pystray',
+        'pystray._win32',
+        'PIL'
     ],
     hookspath=[],
     hooksconfig={},

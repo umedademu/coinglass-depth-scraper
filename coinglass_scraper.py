@@ -30,6 +30,8 @@ import platform
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import sqlite3
+import pystray
+from PIL import Image
 
 
 class CoinglassScraperFinal:
@@ -540,6 +542,14 @@ class ScraperGUIFinal:
         self.root.title("Coinglass BTC-USDT Order Book Monitor - Final Version")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
+        # ウィンドウアイコンを設定
+        if os.path.exists('icon.ico'):
+            try:
+                self.root.iconbitmap('icon.ico')
+            except Exception as e:
+                # アイコン設定に失敗した場合は無視
+                pass
+        
         self.scraper = CoinglassScraperFinal()
         self.scraper_thread = None
         
@@ -555,6 +565,10 @@ class ScraperGUIFinal:
         self.init_database()
         # 既存データの読み込み
         self.load_historical_data()
+        
+        # システムトレイ関連
+        self.tray_icon = None
+        self.is_minimized_to_tray = False
         
     def setup_ui(self):
         """UIのセットアップ"""
@@ -1219,8 +1233,92 @@ class ScraperGUIFinal:
         
     def on_closing(self):
         """アプリケーション終了時の処理"""
+        # ダイアログを表示
+        if not self.is_minimized_to_tray:
+            # カスタムダイアログを作成
+            dialog = tk.Toplevel(self.root)
+            dialog.title("終了確認")
+            dialog.geometry("350x150")
+            dialog.resizable(False, False)
+            
+            # ダイアログのアイコンも設定
+            if os.path.exists('icon.ico'):
+                try:
+                    dialog.iconbitmap('icon.ico')
+                except:
+                    pass
+            
+            # ダイアログを中央に配置
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # ウィンドウ位置を中央に
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+            y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+            dialog.geometry(f"+{x}+{y}")
+            
+            # メッセージラベル
+            msg_label = ttk.Label(
+                dialog,
+                text="アプリケーションを終了しますか？",
+                padding="20"
+            )
+            msg_label.pack()
+            
+            # ボタンフレーム
+            button_frame = ttk.Frame(dialog)
+            button_frame.pack(pady=20)
+            
+            # 選択結果を保存する変数
+            result = {'action': None}
+            
+            def on_quit():
+                result['action'] = 'quit'
+                dialog.destroy()
+            
+            def on_tray():
+                result['action'] = 'tray'
+                dialog.destroy()
+            
+            def on_cancel():
+                result['action'] = 'cancel'
+                dialog.destroy()
+            
+            # ボタンを作成
+            quit_btn = ttk.Button(button_frame, text="終了", command=on_quit, width=15)
+            quit_btn.grid(row=0, column=0, padx=5)
+            
+            tray_btn = ttk.Button(button_frame, text="タスクトレイに常駐", command=on_tray, width=20)
+            tray_btn.grid(row=0, column=1, padx=5)
+            
+            cancel_btn = ttk.Button(button_frame, text="キャンセル", command=on_cancel, width=15)
+            cancel_btn.grid(row=0, column=2, padx=5)
+            
+            # デフォルトフォーカスをキャンセルに
+            cancel_btn.focus_set()
+            
+            # ダイアログが閉じられるのを待つ
+            self.root.wait_window(dialog)
+            
+            # 結果に応じて処理
+            if result['action'] == 'quit':
+                self.quit_app()
+            elif result['action'] == 'tray':
+                self.minimize_to_tray()
+            # cancel の場合は何もしない
+        else:
+            # 既にトレイに常駐している場合は何もしない
+            return
+    
+    def quit_app(self):
+        """アプリケーションを完全に終了"""
         self.scraper.is_running = False
         self.scraper.close_driver()
+        
+        # トレイアイコンを停止
+        if self.tray_icon:
+            self.tray_icon.stop()
         
         # データベース接続を閉じる
         try:
@@ -1232,6 +1330,84 @@ class ScraperGUIFinal:
             pass
             
         self.root.destroy()
+    
+    def create_tray_icon(self):
+        """システムトレイアイコンを作成"""
+        # アイコンファイルが存在する場合は使用、なければデフォルトアイコンを作成
+        if os.path.exists('icon.ico'):
+            try:
+                image = Image.open('icon.ico')
+                # 16x16にリサイズ（トレイアイコン用）
+                image = image.resize((16, 16), Image.Resampling.LANCZOS)
+            except:
+                # アイコン読み込みに失敗した場合はデフォルトアイコンを作成
+                image = self.create_default_icon()
+        else:
+            image = self.create_default_icon()
+        
+        # トレイメニューの作成
+        menu = pystray.Menu(
+            pystray.MenuItem("表示", self.show_window, default=True),  # defaultをTrueにすることでダブルクリック対応
+            pystray.MenuItem("スクレイピング開始", self.tray_start_scraping),
+            pystray.MenuItem("スクレイピング停止", self.tray_stop_scraping),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("終了", self.quit_from_tray)
+        )
+        
+        # トレイアイコンの作成
+        self.tray_icon = pystray.Icon(
+            "CoinglassScraper",
+            image,
+            "Coinglass Scraper",
+            menu
+        )
+        
+        # トレイアイコンをバックグラウンドで実行
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+    
+    def create_default_icon(self):
+        """デフォルトのトレイアイコンを作成"""
+        # 16x16のデフォルトアイコンを作成（緑色の四角）
+        image = Image.new('RGB', (16, 16), color='green')
+        return image
+    
+    def minimize_to_tray(self):
+        """ウィンドウをトレイに最小化"""
+        # トレイアイコンがなければ作成
+        if not self.tray_icon:
+            self.create_tray_icon()
+        
+        # ウィンドウを非表示にする
+        self.root.withdraw()
+        self.is_minimized_to_tray = True
+        
+        # バルーン通知を表示（Windows）
+        if platform.system() == "Windows" and self.tray_icon:
+            self.tray_icon.notify(
+                "Coinglass Scraper",
+                "システムトレイに最小化しました"
+            )
+    
+    def show_window(self, icon=None, item=None):
+        """トレイから元に戻す"""
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        self.is_minimized_to_tray = False
+    
+    def tray_start_scraping(self, icon=None, item=None):
+        """トレイメニューからスクレイピング開始"""
+        if not self.scraper.is_running:
+            self.root.after(0, self.start_scraping)
+    
+    def tray_stop_scraping(self, icon=None, item=None):
+        """トレイメニューからスクレイピング停止"""
+        if self.scraper.is_running:
+            self.root.after(0, self.stop_scraping)
+    
+    def quit_from_tray(self, icon=None, item=None):
+        """トレイメニューから完全終了"""
+        self.root.after(0, self.quit_app)
         
     def run(self):
         """アプリケーションを実行"""
