@@ -35,7 +35,7 @@ from PIL import Image
 from cloud_sync import CloudSyncManager
 
 
-class CoinglassScraperFinal:
+class CoinglassScraper:
     def __init__(self):
         self.driver = None
         self.is_running = False
@@ -48,7 +48,7 @@ class CoinglassScraperFinal:
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('coinglass_scraper_final.log', encoding='utf-8')
+                logging.FileHandler('coinglass_scraper.log', encoding='utf-8')
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -537,10 +537,10 @@ class CoinglassScraperFinal:
             self.driver = None
 
 
-class ScraperGUIFinal:
+class ScraperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Coinglass BTC-USDT Order Book Monitor - Final Version")
+        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.10")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         # ウィンドウアイコンを設定
@@ -551,7 +551,7 @@ class ScraperGUIFinal:
                 # アイコン設定に失敗した場合は無視
                 pass
         
-        self.scraper = CoinglassScraperFinal()
+        self.scraper = CoinglassScraper()
         self.scraper_thread = None
         
         # グラフ用のデータ履歴（全データ保持）
@@ -982,49 +982,57 @@ class ScraperGUIFinal:
             """)
             result = cursor.fetchone()
             
+            now = datetime.now()
+            start_time = None
+            
             if result and result[0]:
+                # 既存データがある場合
                 last_timestamp = datetime.fromisoformat(result[0])
-                now = datetime.now()
-                
-                # 最新データから現在時刻までの欠損期間をチェック
                 time_diff = (now - last_timestamp).total_seconds()
                 
                 if time_diff > 120:  # 2分以上の欠損がある場合
-                    self.add_log("クラウドから欠損データを取得中...")
+                    start_time = last_timestamp + timedelta(minutes=1)
+            else:
+                # 新規インストール（データがない場合）- 過去24時間分を取得
+                start_time = now - timedelta(hours=24)
+                self.add_log("新規インストールを検出。過去24時間分のデータを取得します...")
+            
+            if start_time:
+                self.add_log("クラウドから欠損データを取得中...")
+                
+                # 欠損データを取得
+                missing_data = self.cloud_sync.fetch_missing_data(
+                    start_time,
+                    now
+                )
+                
+                if missing_data:
+                    inserted_count = 0
+                    for record in missing_data:
+                        try:
+                            # ローカルDBに保存
+                            cursor.execute("""
+                                INSERT OR REPLACE INTO order_book_history 
+                                (timestamp, ask_total, bid_total, price)
+                                VALUES (?, ?, ?, ?)
+                            """, (
+                                record['timestamp'],
+                                record['ask_total'],
+                                record['bid_total'],
+                                record['price']
+                            ))
+                            
+                            # メモリ上の履歴にも追加
+                            timestamp = datetime.fromisoformat(record['timestamp'])
+                            self.time_history.append(timestamp)
+                            self.ask_history.append(record['ask_total'])
+                            self.bid_history.append(record['bid_total'])
+                            inserted_count += 1
+                            
+                        except Exception as e:
+                            self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
                     
-                    # 欠損データを取得
-                    missing_data = self.cloud_sync.fetch_missing_data(
-                        last_timestamp + timedelta(minutes=1),
-                        now
-                    )
-                    
-                    if missing_data:
-                        inserted_count = 0
-                        for record in missing_data:
-                            try:
-                                # ローカルDBに保存
-                                cursor.execute("""
-                                    INSERT OR REPLACE INTO order_book_history 
-                                    (timestamp, ask_total, bid_total, price)
-                                    VALUES (?, ?, ?, ?)
-                                """, (
-                                    record['timestamp'],
-                                    record['ask_total'],
-                                    record['bid_total'],
-                                    record['price']
-                                ))
-                                
-                                # メモリ上の履歴にも追加
-                                timestamp = datetime.fromisoformat(record['timestamp'])
-                                self.time_history.append(timestamp)
-                                self.ask_history.append(record['ask_total'])
-                                self.bid_history.append(record['bid_total'])
-                                inserted_count += 1
-                                
-                            except Exception as e:
-                                self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
-                        
-                        if inserted_count > 0:
+                    if inserted_count > 0:
                             self.conn.commit()
                             self.add_log(f"クラウドから{inserted_count}件のデータを取得しました")
                             
@@ -1538,5 +1546,5 @@ class ScraperGUIFinal:
 
 
 if __name__ == "__main__":
-    app = ScraperGUIFinal()
+    app = ScraperGUI()
     app.run()
