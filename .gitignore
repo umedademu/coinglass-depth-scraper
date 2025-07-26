@@ -34,3 +34,6 @@ dist/
 
 # Database
 *.db
+
+# Installer output
+installer_output/*.exe
