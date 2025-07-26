@@ -2,7 +2,7 @@
 ; Inno Setup 6用
 
 #define MyAppName "Coinglass Scraper"
-#define MyAppVersion "1.10"
+#define MyAppVersion "1.13"
 #define MyAppPublisher "Coinglass Scraper Development Team"
 #define MyAppURL "https://github.com/umedademu/coinglass-depth-scraper"
 #define MyAppExeName "CoinglassScraper.exe"

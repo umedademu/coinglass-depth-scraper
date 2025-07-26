@@ -540,7 +540,7 @@ class CoinglassScraper:
 class ScraperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.10")
+        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.13")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         # ウィンドウアイコンを設定
@@ -937,6 +937,16 @@ class ScraperGUI:
                     bid_total,
                     price
                 )
+                
+                # 5分間隔の同期タイミングで欠損チェックも実行
+                if rounded_timestamp.minute % 5 == 0:
+                    # 非同期で欠損チェックを実行（メインスレッドをブロックしない）
+                    import threading
+                    check_thread = threading.Thread(
+                        target=self.check_and_fetch_missing_data_async,
+                        daemon=True
+                    )
+                    check_thread.start()
             
             # 300日以上前のデータを削除
             cutoff_date = (datetime.now() - timedelta(days=300)).isoformat()
@@ -971,6 +981,74 @@ class ScraperGUI:
             # 5秒後に再度更新
             self.root.after(5000, self.update_sync_status)
     
+    def check_and_fetch_missing_data_async(self):
+        """非同期で欠損データをチェックして取得（起動中の定期チェック用）"""
+        try:
+            # クラウド同期が有効でない場合はスキップ
+            if not hasattr(self, 'cloud_sync') or not self.cloud_sync or not self.cloud_sync.enabled:
+                return
+                
+            cursor = self.conn.cursor()
+            
+            # ローカルDBの最新タイムスタンプを取得
+            cursor.execute("""
+                SELECT MAX(timestamp) FROM order_book_history
+            """)
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                last_timestamp = datetime.fromisoformat(result[0])
+                now = datetime.now()
+                
+                # 最新データから現在時刻までの欠損期間をチェック
+                time_diff = (now - last_timestamp).total_seconds()
+                
+                if time_diff > 360:  # 6分以上の欠損がある場合
+                    self.add_log(f"欠損データを検出（{int(time_diff/60)}分間）。クラウドから取得中...")
+                    
+                    # 欠損データを取得
+                    missing_data = self.cloud_sync.fetch_missing_data(
+                        last_timestamp + timedelta(minutes=1),
+                        now
+                    )
+                    
+                    if missing_data:
+                        inserted_count = 0
+                        for record in missing_data:
+                            try:
+                                # ローカルDBに保存（既存データはスキップ）
+                                # Supabaseのタイムスタンプからタイムゾーンを除去
+                                timestamp_str = record['timestamp']
+                                if '+' in timestamp_str or 'T' in timestamp_str:
+                                    # ISO形式のタイムスタンプをパース
+                                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                    # タイムゾーンを削除してローカルタイムとして保存
+                                    timestamp_str = dt.replace(tzinfo=None).isoformat()
+                                
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO order_book_history 
+                                    (timestamp, ask_total, bid_total, price)
+                                    VALUES (?, ?, ?, ?)
+                                """, (
+                                    timestamp_str,
+                                    record['ask_total'],
+                                    record['bid_total'],
+                                    record['price']
+                                ))
+                                
+                                if cursor.rowcount > 0:
+                                    inserted_count += 1
+                                    
+                            except Exception as e:
+                                self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
+                        
+                        if inserted_count > 0:
+                            self.conn.commit()
+                            self.add_log(f"起動中の欠損チェックで{inserted_count}件のデータを補完しました")
+                            
+        except Exception as e:
+            self.add_log(f"欠損チェックエラー: {str(e)}", "WARNING")
+    
     def fetch_missing_data_from_cloud(self):
         """クラウドから欠損データを取得"""
         try:
@@ -990,7 +1068,7 @@ class ScraperGUI:
                 last_timestamp = datetime.fromisoformat(result[0])
                 time_diff = (now - last_timestamp).total_seconds()
                 
-                if time_diff > 120:  # 2分以上の欠損がある場合
+                if time_diff > 360:  # 6分以上の欠損がある場合（5分間隔の同期なので）
                     start_time = last_timestamp + timedelta(minutes=1)
             else:
                 # 新規インストール（データがない場合）- 過去24時間分を取得
@@ -1010,20 +1088,28 @@ class ScraperGUI:
                     inserted_count = 0
                     for record in missing_data:
                         try:
-                            # ローカルDBに保存
+                            # ローカルDBに保存（タイムゾーン情報を削除）
+                            # Supabaseのタイムスタンプからタイムゾーンを除去
+                            timestamp_str = record['timestamp']
+                            if '+' in timestamp_str or 'T' in timestamp_str:
+                                # ISO形式のタイムスタンプをパース
+                                dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                # タイムゾーンを削除してローカルタイムとして保存
+                                timestamp_str = dt.replace(tzinfo=None).isoformat()
+                            
                             cursor.execute("""
                                 INSERT OR REPLACE INTO order_book_history 
                                 (timestamp, ask_total, bid_total, price)
                                 VALUES (?, ?, ?, ?)
                             """, (
-                                record['timestamp'],
+                                timestamp_str,
                                 record['ask_total'],
                                 record['bid_total'],
                                 record['price']
                             ))
                             
-                            # メモリ上の履歴にも追加
-                            timestamp = datetime.fromisoformat(record['timestamp'])
+                            # メモリ上の履歴にも追加（タイムゾーンなしで統一）
+                            timestamp = datetime.fromisoformat(timestamp_str)
                             self.time_history.append(timestamp)
                             self.ask_history.append(record['ask_total'])
                             self.bid_history.append(record['bid_total'])
@@ -1037,10 +1123,7 @@ class ScraperGUI:
                             self.add_log(f"クラウドから{inserted_count}件のデータを取得しました")
                             
                             # 時系列順にソート
-                            sorted_data = sorted(zip(self.time_history, self.ask_history, self.bid_history))
-                            self.time_history = [x[0] for x in sorted_data]
-                            self.ask_history = [x[1] for x in sorted_data]
-                            self.bid_history = [x[2] for x in sorted_data]
+                            self.sort_history_data()
                             
                             # UIを更新
                             self.update_timeframe_options()
@@ -1091,8 +1174,22 @@ class ScraperGUI:
             if hasattr(self, 'cloud_sync') and self.cloud_sync and self.cloud_sync.enabled:
                 self.fetch_missing_data_from_cloud()
                 
+            # 最後に必ず時系列順にソート（クラウドデータと統合後）
+            if len(self.time_history) > 0:
+                self.sort_history_data()
+                self.update_graph()
+                
         except Exception as e:
             self.add_log(f"データ読み込みエラー: {str(e)}", "ERROR")
+    
+    def sort_history_data(self):
+        """履歴データを時系列順にソート"""
+        if len(self.time_history) > 0:
+            # 時系列順にソート
+            sorted_data = sorted(zip(self.time_history, self.ask_history, self.bid_history))
+            self.time_history = [x[0] for x in sorted_data]
+            self.ask_history = [x[1] for x in sorted_data]
+            self.bid_history = [x[2] for x in sorted_data]
     
     def update_graph(self):
         """グラフを更新"""
