@@ -6,7 +6,7 @@ a = Analysis(
     ['coinglass_scraper.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('config.json', '.')],
     hiddenimports=[
         'tkinter',
         'matplotlib',
@@ -22,7 +22,17 @@ a = Analysis(
         'PIL._tkinter_finder',
         'pystray',
         'pystray._win32',
-        'PIL'
+        'PIL',
+        'supabase',
+        'gotrue',
+        'postgrest',
+        'realtime',
+        'storage3',
+        'supafunc',
+        'websockets',
+        'pydantic',
+        'httpx',
+        'cloud_sync'
     ],
     hookspath=[],
     hooksconfig={},

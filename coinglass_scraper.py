@@ -32,6 +32,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 import sqlite3
 import pystray
 from PIL import Image
+from cloud_sync import CloudSyncManager
 
 
 class CoinglassScraperFinal:
@@ -558,8 +559,20 @@ class ScraperGUIFinal:
         self.ask_history = []
         self.bid_history = []
         
+        # 初期値を設定
+        self.cloud_sync = None
+        
         self.setup_ui()
         self.setup_graph()
+        
+        # UIセットアップ後にクラウド同期を初期化
+        try:
+            self.cloud_sync = CloudSyncManager(log_callback=self.add_log)
+            if self.cloud_sync.enabled:
+                self.add_log("クラウド同期機能が有効です", "INFO")
+        except Exception as e:
+            self.add_log(f"クラウド同期の初期化に失敗: {str(e)}", "WARNING")
+            self.cloud_sync = None
         
         # データベースの初期化
         self.init_database()
@@ -661,6 +674,15 @@ class ScraperGUIFinal:
         headless_check = ttk.Checkbutton(control_frame, text="ヘッドレスモード", 
                                         variable=self.headless_var)
         headless_check.grid(row=0, column=6, padx=10)
+        
+        # クラウド同期状態
+        if hasattr(self, 'cloud_sync') and self.cloud_sync and self.cloud_sync.enabled:
+            ttk.Separator(control_frame, orient='vertical').grid(row=0, column=7, sticky='ns', padx=10)
+            self.sync_status_label = ttk.Label(control_frame, text="☁ 同期: 待機中", 
+                                             font=('Arial', 9), foreground='green')
+            self.sync_status_label.grid(row=0, column=8, padx=5)
+            # 定期的に同期状態を更新
+            self.update_sync_status()
         
         # PanedWindowを作成（縦分割、サイズ調整可能）
         paned_window = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
@@ -895,14 +917,26 @@ class ScraperGUIFinal:
     def save_to_database(self, timestamp, ask_total, bid_total, price):
         """データをデータベースに保存"""
         try:
+            # タイムスタンプを分単位に丸める（秒を00にする）
+            rounded_timestamp = timestamp.replace(second=0, microsecond=0)
+            
             cursor = self.conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO order_book_history 
                 (timestamp, ask_total, bid_total, price)
                 VALUES (?, ?, ?, ?)
-            """, (timestamp.isoformat(), ask_total, bid_total, price))
+            """, (rounded_timestamp.isoformat(), ask_total, bid_total, price))
             
             self.conn.commit()
+            
+            # クラウド同期を実行（丸めたタイムスタンプを使用）
+            if hasattr(self, 'cloud_sync') and self.cloud_sync:
+                self.cloud_sync.sync_data_async(
+                    rounded_timestamp.isoformat(),
+                    ask_total,
+                    bid_total,
+                    price
+                )
             
             # 300日以上前のデータを削除
             cutoff_date = (datetime.now() - timedelta(days=300)).isoformat()
@@ -925,6 +959,90 @@ class ScraperGUIFinal:
                     if i == 2:
                         self.add_log("データ保存に失敗しました", "ERROR")
                         
+    def update_sync_status(self):
+        """同期状態を更新"""
+        if hasattr(self, 'sync_status_label') and self.cloud_sync:
+            status = self.cloud_sync.get_sync_status()
+            if status['last_sync']:
+                self.sync_status_label.config(text="☁ 同期: 完了", foreground='green')
+            else:
+                self.sync_status_label.config(text="☁ 同期: 待機中", foreground='gray')
+            
+            # 5秒後に再度更新
+            self.root.after(5000, self.update_sync_status)
+    
+    def fetch_missing_data_from_cloud(self):
+        """クラウドから欠損データを取得"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # ローカルDBの最新タイムスタンプを取得
+            cursor.execute("""
+                SELECT MAX(timestamp) FROM order_book_history
+            """)
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                last_timestamp = datetime.fromisoformat(result[0])
+                now = datetime.now()
+                
+                # 最新データから現在時刻までの欠損期間をチェック
+                time_diff = (now - last_timestamp).total_seconds()
+                
+                if time_diff > 120:  # 2分以上の欠損がある場合
+                    self.add_log("クラウドから欠損データを取得中...")
+                    
+                    # 欠損データを取得
+                    missing_data = self.cloud_sync.fetch_missing_data(
+                        last_timestamp + timedelta(minutes=1),
+                        now
+                    )
+                    
+                    if missing_data:
+                        inserted_count = 0
+                        for record in missing_data:
+                            try:
+                                # ローカルDBに保存
+                                cursor.execute("""
+                                    INSERT OR REPLACE INTO order_book_history 
+                                    (timestamp, ask_total, bid_total, price)
+                                    VALUES (?, ?, ?, ?)
+                                """, (
+                                    record['timestamp'],
+                                    record['ask_total'],
+                                    record['bid_total'],
+                                    record['price']
+                                ))
+                                
+                                # メモリ上の履歴にも追加
+                                timestamp = datetime.fromisoformat(record['timestamp'])
+                                self.time_history.append(timestamp)
+                                self.ask_history.append(record['ask_total'])
+                                self.bid_history.append(record['bid_total'])
+                                inserted_count += 1
+                                
+                            except Exception as e:
+                                self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
+                        
+                        if inserted_count > 0:
+                            self.conn.commit()
+                            self.add_log(f"クラウドから{inserted_count}件のデータを取得しました")
+                            
+                            # 時系列順にソート
+                            sorted_data = sorted(zip(self.time_history, self.ask_history, self.bid_history))
+                            self.time_history = [x[0] for x in sorted_data]
+                            self.ask_history = [x[1] for x in sorted_data]
+                            self.bid_history = [x[2] for x in sorted_data]
+                            
+                            # UIを更新
+                            self.update_timeframe_options()
+                            self.update_graph()
+                    else:
+                        self.add_log("クラウドに欠損データはありません")
+                        
+        except Exception as e:
+            self.add_log(f"クラウドデータ取得エラー: {str(e)}", "WARNING")
+    
     def load_historical_data(self):
         """起動時に過去のデータを読み込む"""
         try:
@@ -960,6 +1078,10 @@ class ScraperGUIFinal:
                 self.update_graph()
             else:
                 self.add_log("過去のデータはありません")
+            
+            # クラウドから欠損データを取得
+            if hasattr(self, 'cloud_sync') and self.cloud_sync and self.cloud_sync.enabled:
+                self.fetch_missing_data_from_cloud()
                 
         except Exception as e:
             self.add_log(f"データ読み込みエラー: {str(e)}", "ERROR")

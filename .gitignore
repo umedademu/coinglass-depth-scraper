@@ -37,3 +37,6 @@ dist/
 
 # Installer output
 installer_output/*.exe
+
+# Configuration files (keep example)
+config.json
