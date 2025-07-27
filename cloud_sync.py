@@ -6,10 +6,16 @@ from typing import Optional, Dict, Any
 from supabase import create_client, Client
 
 class CloudSyncManager:
-    def __init__(self, config_path: str = "config.json", log_callback=None):
+    def __init__(self, config_path: str = None, log_callback=None):
         # loggerを最初に初期化
         self.logger = logging.getLogger(__name__)
         self.log_callback = log_callback
+        
+        # config_pathが指定されていない場合は、AppDataから読み込む
+        if config_path is None:
+            import os
+            appdata_dir = os.path.join(os.environ.get('APPDATA', ''), 'CoinglassScraper')
+            config_path = os.path.join(appdata_dir, 'config.json')
         
         # 設定を読み込み
         self.config = self._load_config(config_path)
@@ -148,6 +154,62 @@ class CloudSyncManager:
             self.logger.error(msg)
             if self.log_callback:
                 self.log_callback(msg, "ERROR")
+    
+    def fetch_all_data(self):
+        """Supabaseから全データを取得"""
+        if not self.enabled or not self.client:
+            return []
+        
+        try:
+            msg = "Supabaseから全データを取得中..."
+            self.logger.info(msg)
+            if self.log_callback:
+                self.log_callback(msg, "INFO")
+            
+            # 全データを取得（最大10000件まで）
+            result = self.client.table('order_book_shared')\
+                .select('*')\
+                .eq('group_id', self.group_id)\
+                .order('timestamp')\
+                .limit(10000)\
+                .execute()
+            
+            if result.data:
+                # 重複するタイムスタンプがある場合は最大値を選択
+                consolidated_data = {}
+                for record in result.data:
+                    ts = record['timestamp']
+                    if ts not in consolidated_data:
+                        consolidated_data[ts] = record
+                    else:
+                        # 最大値を選択
+                        existing = consolidated_data[ts]
+                        consolidated_data[ts] = {
+                            'timestamp': ts,
+                            'ask_total': max(record['ask_total'], existing['ask_total']),
+                            'bid_total': max(record['bid_total'], existing['bid_total']),
+                            'price': record['price']
+                        }
+                
+                result_list = list(consolidated_data.values())
+                msg = f"Supabaseから{len(result_list)}件のデータを取得しました"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
+                return result_list
+            else:
+                msg = "Supabaseにデータはありませんでした"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
+                return []
+                
+        except Exception as e:
+            msg = f"全データ取得エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+            return []
     
     def fetch_missing_data(self, start_time: datetime, end_time: datetime):
         if not self.enabled or not self.client:

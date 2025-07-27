@@ -44,11 +44,16 @@ class CoinglassScraper:
         self.last_valid_price = None  # 前回の有効な価格を保存
         
         # ログ設定
+        # AppDataフォルダにログを保存
+        appdata_dir = os.path.join(os.environ.get('APPDATA', ''), 'CoinglassScraper')
+        os.makedirs(appdata_dir, exist_ok=True)
+        log_file = os.path.join(appdata_dir, 'coinglass_scraper.log')
+        
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('coinglass_scraper.log', encoding='utf-8')
+                logging.FileHandler(log_file, encoding='utf-8')
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -540,7 +545,7 @@ class CoinglassScraper:
 class ScraperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.13")
+        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.17")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         # ウィンドウアイコンを設定
@@ -887,7 +892,10 @@ class ScraperGUI:
     def init_database(self):
         """SQLiteデータベースを初期化"""
         try:
-            self.db_path = "btc_usdt_order_book.db"
+            # AppDataフォルダにデータベースを保存
+            appdata_dir = os.path.join(os.environ.get('APPDATA', ''), 'CoinglassScraper')
+            os.makedirs(appdata_dir, exist_ok=True)
+            self.db_path = os.path.join(appdata_dir, "btc_usdt_order_book.db")
             # スレッドセーフな接続を作成
             self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             cursor = self.conn.cursor()
@@ -982,15 +990,19 @@ class ScraperGUI:
             self.root.after(5000, self.update_sync_status)
     
     def check_and_fetch_missing_data_async(self):
-        """非同期で欠損データをチェックして取得（起動中の定期チェック用）"""
+        """非同期で欠損データをチェックして取得（全データをチェック）"""
         try:
             # クラウド同期が有効でない場合はスキップ
             if not hasattr(self, 'cloud_sync') or not self.cloud_sync or not self.cloud_sync.enabled:
                 return
                 
-            cursor = self.conn.cursor()
+            self.add_log("定期的な全データ同期を実行中...")
             
-            # ローカルDBの最新タイムスタンプを取得
+            # 全データの同期を実行
+            self.fetch_missing_data_from_cloud()
+            
+            # 最新データから現在時刻までの欠損もチェック（従来の処理）
+            cursor = self.conn.cursor()
             cursor.execute("""
                 SELECT MAX(timestamp) FROM order_book_history
             """)
@@ -1004,7 +1016,7 @@ class ScraperGUI:
                 time_diff = (now - last_timestamp).total_seconds()
                 
                 if time_diff > 360:  # 6分以上の欠損がある場合
-                    self.add_log(f"欠損データを検出（{int(time_diff/60)}分間）。クラウドから取得中...")
+                    self.add_log(f"最新データから{int(time_diff/60)}分間の欠損を検出。クラウドから取得中...")
                     
                     # 欠損データを取得
                     missing_data = self.cloud_sync.fetch_missing_data(
@@ -1044,45 +1056,39 @@ class ScraperGUI:
                         
                         if inserted_count > 0:
                             self.conn.commit()
-                            self.add_log(f"起動中の欠損チェックで{inserted_count}件のデータを補完しました")
+                            self.add_log(f"最新データの欠損チェックで{inserted_count}件のデータを補完しました")
                             
         except Exception as e:
             self.add_log(f"欠損チェックエラー: {str(e)}", "WARNING")
     
     def fetch_missing_data_from_cloud(self):
-        """クラウドから欠損データを取得"""
+        """クラウドから欠損データを取得（全データをチェック）"""
         try:
             cursor = self.conn.cursor()
             
-            # ローカルDBの最新タイムスタンプを取得
+            # ローカルDBの全タイムスタンプを取得
             cursor.execute("""
-                SELECT MAX(timestamp) FROM order_book_history
+                SELECT DISTINCT timestamp FROM order_book_history
             """)
-            result = cursor.fetchone()
+            local_timestamps = set(row[0] for row in cursor.fetchall())
             
-            now = datetime.now()
-            start_time = None
+            self.add_log("Supabaseから全データを取得してローカルDBと照合中...")
             
-            if result and result[0]:
-                # 既存データがある場合
-                last_timestamp = datetime.fromisoformat(result[0])
-                time_diff = (now - last_timestamp).total_seconds()
-                
-                if time_diff > 360:  # 6分以上の欠損がある場合（5分間隔の同期なので）
-                    start_time = last_timestamp + timedelta(minutes=1)
-            else:
-                # 新規インストール（データがない場合）- 過去24時間分を取得
-                start_time = now - timedelta(hours=24)
-                self.add_log("新規インストールを検出。過去24時間分のデータを取得します...")
+            # Supabaseから全データを取得
+            all_cloud_data = self.cloud_sync.fetch_all_data()
             
-            if start_time:
-                self.add_log("クラウドから欠損データを取得中...")
-                
-                # 欠損データを取得
-                missing_data = self.cloud_sync.fetch_missing_data(
-                    start_time,
-                    now
-                )
+            if all_cloud_data:
+                # ローカルに存在しないデータをフィルタリング
+                missing_data = []
+                for record in all_cloud_data:
+                    # タイムスタンプからタイムゾーン情報を除去してチェック
+                    timestamp_str = record['timestamp']
+                    if '+' in timestamp_str or 'T' in timestamp_str:
+                        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        timestamp_str = dt.replace(tzinfo=None).isoformat()
+                    
+                    if timestamp_str not in local_timestamps:
+                        missing_data.append(record)
                 
                 if missing_data:
                     inserted_count = 0
