@@ -1218,17 +1218,46 @@ class ScraperGUI:
             }
             interval = timeframe_intervals[timeframe]
             
-            # データをフィルタリング（各時間足の最後のデータのみ採用）
+            # 時刻ベースでデータをグループ化
             filtered_times = []
             filtered_asks = []
             filtered_bids = []
             
+            # グループ化のための辞書（キー：時間帯、値：その時間帯のデータリスト）
+            time_groups = {}
+            
             for i in range(len(self.time_history)):
-                # intervalごとに最後のデータのみ採用
-                if (i + 1) % interval == 0 or i == len(self.time_history) - 1:
-                    filtered_times.append(self.time_history[i])
-                    filtered_asks.append(self.ask_history[i])
-                    filtered_bids.append(self.bid_history[i])
+                time_obj = self.time_history[i]
+                
+                # 時間帯を決定（分単位の間隔に基づく）
+                if interval < 60:  # 分足の場合
+                    # 指定分単位で切り捨て
+                    group_minute = (time_obj.minute // interval) * interval
+                    group_key = time_obj.replace(minute=group_minute, second=0, microsecond=0)
+                elif interval == 60:  # 1時間足の場合
+                    group_key = time_obj.replace(minute=0, second=0, microsecond=0)
+                elif interval < 1440:  # 時間足の場合（2時間、4時間）
+                    hours_interval = interval // 60
+                    group_hour = (time_obj.hour // hours_interval) * hours_interval
+                    group_key = time_obj.replace(hour=group_hour, minute=0, second=0, microsecond=0)
+                else:  # 日足の場合
+                    group_key = time_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # グループにデータを追加
+                if group_key not in time_groups:
+                    time_groups[group_key] = []
+                time_groups[group_key].append((time_obj, self.ask_history[i], self.bid_history[i]))
+            
+            # 各グループから最後（最新）のデータを選択
+            sorted_groups = sorted(time_groups.keys())
+            for group_key in sorted_groups:
+                # グループ内のデータを時刻でソート
+                group_data = sorted(time_groups[group_key], key=lambda x: x[0])
+                # 最後のデータを採用（終値）
+                last_data = group_data[-1]
+                filtered_times.append(last_data[0])
+                filtered_asks.append(last_data[1])
+                filtered_bids.append(last_data[2])
             
             # 最大300点に制限
             if len(filtered_times) > 300:
