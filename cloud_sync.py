@@ -3,7 +3,15 @@ import threading
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from supabase import create_client, Client
+
+# Supabaseのインポートを試行
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    Client = None
+    create_client = None
 
 class CloudSyncManager:
     def __init__(self, config_path: str = None, log_callback=None):
@@ -19,13 +27,22 @@ class CloudSyncManager:
         
         # 設定を読み込み
         self.config = self._load_config(config_path)
-        self.enabled = self.config.get("cloud_sync", {}).get("enabled", False)
+        # Supabaseが利用できない場合は無効化
+        if not SUPABASE_AVAILABLE:
+            self.enabled = False
+            msg = "Supabaseモジュールが利用できないため、クラウド同期は無効です"
+            self.logger.warning(msg)
+            if self.log_callback:
+                self.log_callback(msg, "WARNING")
+        else:
+            self.enabled = self.config.get("cloud_sync", {}).get("enabled", False)
+        
         self.client: Optional[Client] = None
         self.last_sync: Optional[datetime] = None
         self.sync_interval = self.config.get("cloud_sync", {}).get("sync_interval_minutes", 5)
         self.group_id = self.config.get("cloud_sync", {}).get("group_id", "default-group")
         
-        if self.enabled:
+        if self.enabled and SUPABASE_AVAILABLE:
             self._initialize_client()
     
     def _load_config(self, config_path: str) -> Dict[str, Any]:
@@ -40,6 +57,9 @@ class CloudSyncManager:
             return {}
     
     def _initialize_client(self):
+        if not SUPABASE_AVAILABLE or not create_client:
+            return
+        
         try:
             cloud_config = self.config.get("cloud_sync", {})
             self.client = create_client(
