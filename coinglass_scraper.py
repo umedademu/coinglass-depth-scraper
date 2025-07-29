@@ -545,7 +545,7 @@ class CoinglassScraper:
 class ScraperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.17")
+        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.18")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         # ウィンドウアイコンを設定
