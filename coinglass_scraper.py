@@ -1591,83 +1591,8 @@ class ScraperGUI:
         
     def on_closing(self):
         """アプリケーション終了時の処理"""
-        # ダイアログを表示
-        if not self.is_minimized_to_tray:
-            # カスタムダイアログを作成
-            dialog = tk.Toplevel(self.root)
-            dialog.title("終了確認")
-            dialog.geometry("350x150")
-            dialog.resizable(False, False)
-            
-            # ダイアログのアイコンも設定
-            if os.path.exists('icon.ico'):
-                try:
-                    dialog.iconbitmap('icon.ico')
-                except:
-                    pass
-            
-            # ダイアログを中央に配置
-            dialog.transient(self.root)
-            dialog.grab_set()
-            
-            # ウィンドウ位置を中央に
-            dialog.update_idletasks()
-            x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
-            y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
-            dialog.geometry(f"+{x}+{y}")
-            
-            # メッセージラベル
-            msg_label = ttk.Label(
-                dialog,
-                text="アプリケーションを終了しますか？",
-                padding="20"
-            )
-            msg_label.pack()
-            
-            # ボタンフレーム
-            button_frame = ttk.Frame(dialog)
-            button_frame.pack(pady=20)
-            
-            # 選択結果を保存する変数
-            result = {'action': None}
-            
-            def on_quit():
-                result['action'] = 'quit'
-                dialog.destroy()
-            
-            def on_tray():
-                result['action'] = 'tray'
-                dialog.destroy()
-            
-            def on_cancel():
-                result['action'] = 'cancel'
-                dialog.destroy()
-            
-            # ボタンを作成
-            quit_btn = ttk.Button(button_frame, text="終了", command=on_quit, width=15)
-            quit_btn.grid(row=0, column=0, padx=5)
-            
-            tray_btn = ttk.Button(button_frame, text="タスクトレイに常駐", command=on_tray, width=20)
-            tray_btn.grid(row=0, column=1, padx=5)
-            
-            cancel_btn = ttk.Button(button_frame, text="キャンセル", command=on_cancel, width=15)
-            cancel_btn.grid(row=0, column=2, padx=5)
-            
-            # デフォルトフォーカスをキャンセルに
-            cancel_btn.focus_set()
-            
-            # ダイアログが閉じられるのを待つ
-            self.root.wait_window(dialog)
-            
-            # 結果に応じて処理
-            if result['action'] == 'quit':
-                self.quit_app()
-            elif result['action'] == 'tray':
-                self.minimize_to_tray()
-            # cancel の場合は何もしない
-        else:
-            # 既にトレイに常駐している場合は何もしない
-            return
+        # 閉じるボタンを押したら直接トレイに格納
+        self.minimize_to_tray()
     
     def quit_app(self):
         """アプリケーションを完全に終了"""
