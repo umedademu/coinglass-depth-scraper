@@ -6,7 +6,7 @@ a = Analysis(
     ['coinglass_scraper.py'],
     pathex=[],
     binaries=[],
-    datas=[('config.json', '.')],
+    datas=[],
     hiddenimports=[
         'tkinter',
         'matplotlib',

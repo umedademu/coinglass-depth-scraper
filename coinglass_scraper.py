@@ -851,12 +851,108 @@ class ScraperGUI:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        # TradingView風のマウス操作を実装
+        self.setup_interactive_controls()
+        
         # 初期グラフを描画
         self.canvas.draw()
         
         # 前回値を保持（最適値選定用）
         self.last_ask_total = None
         self.last_bid_total = None
+    
+    def setup_interactive_controls(self):
+        """TradingView風のマウス操作を設定"""
+        # ドラッグ用の変数
+        self.press = None
+        self.cur_xlim_ask = None
+        self.cur_ylim_ask = None
+        self.cur_xlim_bid = None
+        self.cur_ylim_bid = None
+        
+        # マウスホイールでズーム
+        def on_scroll(event):
+            try:
+                # どちらのグラフ上でも両方のグラフをズーム（X軸のみ）
+                # 現在の表示範囲を取得
+                xlim_ask = self.ax_ask.get_xlim()
+                
+                # マウス位置を取得（グラフ内の座標）
+                xdata = event.xdata
+                
+                # グラフ外でホイールを回した場合は中心でズーム
+                if xdata is None:
+                    xdata = (xlim_ask[0] + xlim_ask[1]) / 2
+                
+                # ズーム率（ホイール上=拡大、下=縮小）
+                if event.button == 'up':
+                    scale = 0.9  # 10%拡大
+                elif event.button == 'down':
+                    scale = 1.1  # 10%縮小
+                else:
+                    return
+                
+                # X軸のズーム（両グラフ共通）
+                new_xlim = [xdata - (xdata - xlim_ask[0]) * scale,
+                           xdata + (xlim_ask[1] - xdata) * scale]
+                
+                # X軸を両グラフに設定
+                self.ax_ask.set_xlim(new_xlim)
+                self.ax_bid.set_xlim(new_xlim)
+                
+                # グラフを再描画
+                self.canvas.draw_idle()
+            except Exception as e:
+                self.logger.error(f"ズームエラー: {e}")
+        
+        # マウスボタンを押したとき
+        def on_press(event):
+            # 左クリックのみ処理
+            if event.button != 1:
+                return
+            
+            self.press = (event.xdata, event.ydata)
+            self.cur_xlim_ask = self.ax_ask.get_xlim()
+            self.cur_ylim_ask = self.ax_ask.get_ylim()
+            self.cur_xlim_bid = self.ax_bid.get_xlim()
+            self.cur_ylim_bid = self.ax_bid.get_ylim()
+        
+        # マウスを動かしたとき（ドラッグ）
+        def on_motion(event):
+            # ドラッグ中でない場合は何もしない
+            if self.press is None:
+                return
+            if event.xdata is None:
+                return
+                
+            # X軸の移動量を計算
+            dx = self.press[0] - event.xdata if self.press[0] is not None else 0
+            
+            # X軸の移動（両グラフ共通）
+            self.ax_ask.set_xlim(self.cur_xlim_ask[0] + dx, self.cur_xlim_ask[1] + dx)
+            self.ax_bid.set_xlim(self.cur_xlim_bid[0] + dx, self.cur_xlim_bid[1] + dx)
+            
+            # グラフを再描画
+            self.canvas.draw_idle()
+        
+        # マウスボタンを離したとき
+        def on_release(event):
+            self.press = None
+        
+        # ダブルクリックでリセット
+        def on_double_click(event):
+            if event.dblclick:
+                # 両グラフを元の表示に戻す
+                self.ax_ask.autoscale()
+                self.ax_bid.autoscale()
+                self.canvas.draw_idle()
+        
+        # イベントをキャンバスに接続
+        self.canvas.mpl_connect('scroll_event', on_scroll)
+        self.canvas.mpl_connect('button_press_event', on_press)
+        self.canvas.mpl_connect('button_press_event', on_double_click)
+        self.canvas.mpl_connect('motion_notify_event', on_motion)
+        self.canvas.mpl_connect('button_release_event', on_release)
     
     def select_best_values(self, data_list):
         """3つの取得データから最適値を選定（最大値を採用）"""

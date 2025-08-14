@@ -64,7 +64,7 @@ Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; アイコンファイル
 Source: "{#MyAppIconName}"; DestDir: "{app}"; Flags: ignoreversion
 ; 設定ファイル（実際の認証情報を含む）
-Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion
+; Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion
 ; ドキュメント（オプション）
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "TRAY_README.md"; DestDir: "{app}"; Flags: ignoreversion
