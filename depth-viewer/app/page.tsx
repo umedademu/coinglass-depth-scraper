@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, OrderBookData } from '../lib/supabase'
 import dynamic from 'next/dynamic'
+import TimeframeSelector, { Timeframe } from '../components/TimeframeSelector'
 
 // Chart.jsはSSRと互換性がないため、動的インポートを使用
 const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
@@ -13,42 +14,52 @@ const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<OrderBookData[]>([])
-  const [chartData, setChartData] = useState<OrderBookData[]>([]) // グラフ用データ（300件）
+  const [allData, setAllData] = useState<OrderBookData[]>([]) // すべてのデータ（グルーピング用）
+  const [groupedChartData, setGroupedChartData] = useState<OrderBookData[]>([]) // グルーピング後のグラフ用データ
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('1hour')
 
   useEffect(() => {
     fetchData()
   }, [])
 
+  // タイムフレーム変更時にデータを再グルーピング
+  useEffect(() => {
+    if (allData.length > 0) {
+      const grouped = groupDataByTimeframe(allData, selectedTimeframe)
+      setGroupedChartData(grouped)
+    }
+  }, [selectedTimeframe, allData])
+
   const fetchData = async () => {
     try {
       console.log('Fetching data from Supabase...')
       
-      // テーブル表示用：最新100件のデータを取得
-      const { data: tableData, error: tableError } = await supabase
+      // 1日分（288件 = 24時間 × 12回/時間）のデータを取得
+      const { data: fetchedData, error: fetchError } = await supabase
         .from('order_book_shared')
         .select('*')
         .eq('group_id', 'default-group')
         .order('timestamp', { ascending: false })
-        .limit(100)
+        .limit(288)
 
-      // グラフ表示用：最新300件のデータを取得
-      const { data: graphData, error: graphError } = await supabase
-        .from('order_book_shared')
-        .select('*')
-        .eq('group_id', 'default-group')
-        .order('timestamp', { ascending: false })
-        .limit(300)
-
-      if (tableError || graphError) {
-        console.error('Error fetching data:', tableError || graphError)
-        setError((tableError || graphError)?.message || 'Error fetching data')
+      if (fetchError) {
+        console.error('Error fetching data:', fetchError)
+        setError(fetchError?.message || 'Error fetching data')
       } else {
-        console.log('✅ Data fetched successfully:', tableData?.length, 'table records,', graphData?.length, 'graph records')
-        setData(tableData || [])
-        setChartData(graphData || [])
+        console.log('✅ Data fetched successfully:', fetchedData?.length, 'records')
+        
+        // データを時系列順に並び替え（グルーピング用）
+        const sortedData = [...(fetchedData || [])].reverse()
+        
+        setAllData(sortedData)
+        setData(fetchedData?.slice(0, 100) || []) // テーブル表示用は最新100件
         setLastUpdate(new Date())
+        
+        // 初期グルーピング
+        const grouped = groupDataByTimeframe(sortedData, selectedTimeframe)
+        setGroupedChartData(grouped)
       }
     } catch (err) {
       console.error('Unexpected error:', err)
@@ -56,6 +67,84 @@ export default function Home() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // タイムフレームに基づいてデータをグルーピング
+  const groupDataByTimeframe = (data: OrderBookData[], timeframe: Timeframe): OrderBookData[] => {
+    if (data.length === 0) return []
+    
+    // timeframeを分単位に変換
+    const timeframeMinutes: Record<Timeframe, number> = {
+      '5min': 5,
+      '15min': 15,
+      '1hour': 60,
+      '4hour': 240,
+      '1day': 1440
+    }
+    const interval = timeframeMinutes[timeframe]
+    
+    // 5分足の場合はそのまま返す
+    if (interval === 5) {
+      return data
+    }
+    
+    // グループ化のための辞書（キー：時間帯、値：その時間帯のデータリスト）
+    const timeGroups: Record<string, OrderBookData[]> = {}
+    
+    for (const item of data) {
+      const timeObj = new Date(item.timestamp)
+      let groupKey: string
+      
+      // 時間帯を決定（デスクトップアプリと同じロジック）
+      if (interval < 60) {  // 分足の場合
+        const groupMinute = Math.floor(timeObj.getMinutes() / interval) * interval
+        const groupTime = new Date(timeObj)
+        groupTime.setMinutes(groupMinute, 0, 0)
+        groupKey = groupTime.toISOString()
+      } else if (interval === 60) {  // 1時間足の場合
+        const groupTime = new Date(timeObj)
+        groupTime.setMinutes(0, 0, 0)
+        groupKey = groupTime.toISOString()
+      } else if (interval < 1440) {  // 時間足の場合（4時間）
+        const hoursInterval = interval / 60
+        const groupHour = Math.floor(timeObj.getHours() / hoursInterval) * hoursInterval
+        const groupTime = new Date(timeObj)
+        groupTime.setHours(groupHour, 0, 0, 0)
+        groupKey = groupTime.toISOString()
+      } else {  // 日足の場合
+        const groupTime = new Date(timeObj)
+        groupTime.setHours(0, 0, 0, 0)
+        groupKey = groupTime.toISOString()
+      }
+      
+      if (!timeGroups[groupKey]) {
+        timeGroups[groupKey] = []
+      }
+      timeGroups[groupKey].push(item)
+    }
+    
+    // 各グループから最後（最新）のデータを選択（終値）
+    const groupedData: OrderBookData[] = []
+    const sortedGroups = Object.keys(timeGroups).sort()
+    
+    for (const groupKey of sortedGroups) {
+      const groupData = timeGroups[groupKey]
+      // グループ内のデータを時刻でソート
+      const sortedGroupData = groupData.sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      )
+      // 最後のデータを採用（終値）
+      const lastData = sortedGroupData[sortedGroupData.length - 1]
+      groupedData.push(lastData)
+    }
+    
+    console.log(`Grouped to ${timeframe}: ${groupedData.length} data points from ${data.length} original points`)
+    return groupedData
+  }
+
+  // タイムフレーム変更ハンドラ
+  const handleTimeframeChange = (timeframe: Timeframe) => {
+    setSelectedTimeframe(timeframe)
   }
 
   // 最新のデータ（最初の1件）
@@ -130,7 +219,7 @@ export default function Home() {
                 backgroundColor: '#2a2a2a',
                 borderRadius: '8px',
                 padding: '1.5rem',
-                marginBottom: '2rem',
+                marginBottom: '1.5rem',
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                 gap: '1rem'
@@ -174,10 +263,16 @@ export default function Home() {
               </div>
             )}
 
+            {/* タイムフレームセレクター */}
+            <TimeframeSelector 
+              onTimeframeChange={handleTimeframeChange}
+              initialTimeframe={selectedTimeframe}
+            />
+
             {/* グラフ表示 */}
-            {chartData.length > 0 && (
-              <div style={{ marginTop: '2rem', marginBottom: '2rem' }}>
-                <OrderBookChart data={chartData} />
+            {groupedChartData.length > 0 && (
+              <div style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
+                <OrderBookChart data={groupedChartData} />
               </div>
             )}
 
