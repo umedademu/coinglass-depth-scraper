@@ -25,6 +25,7 @@
 
 ### データベース環境
 - Supabaseプロジェクト「depth」が稼働中
+- **Supabase MCPツール使用時**: 必ずプロジェクトID `rijqtostuemonbfcntck` を使用すること
 - 以下のテーブルが存在し、データが継続的に追加されている：
   - `order_book_shared` - 5分足データ
   - `order_book_15min` - 15分足データ

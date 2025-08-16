@@ -115,40 +115,91 @@ class CloudSyncManager:
         thread.start()
         self.last_sync = datetime.now()
         
-        # 1時間足データの保存チェック
-        self._check_and_save_hourly_data(timestamp, ask_total, bid_total, price)
+        # 各時間足データの保存チェック
+        self._check_and_save_all_timeframes(timestamp, ask_total, bid_total, price)
     
-    def _check_and_save_hourly_data(self, timestamp: str, ask_total: float, bid_total: float, price: float):
-        """1時間足データの保存（毎時00分のみ）"""
+    def _check_and_save_all_timeframes(self, timestamp: str, ask_total: float, bid_total: float, price: float):
+        """全時間足データの保存チェック"""
         try:
             # タイムスタンプをdatetimeオブジェクトに変換
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             
-            # 00分の場合のみ1時間足データを保存
+            # 15分足（00, 15, 30, 45分）
+            if dt.minute in [0, 15, 30, 45]:
+                self._save_timeframe_data('order_book_15min', dt, 15, ask_total, bid_total, price)
+            
+            # 30分足（00, 30分）
+            if dt.minute in [0, 30]:
+                self._save_timeframe_data('order_book_30min', dt, 30, ask_total, bid_total, price)
+            
+            # 1時間足（毎時00分）
             if dt.minute == 0:
-                # 1時間足用のタイムスタンプ（秒・ミリ秒を0に）
-                hourly_timestamp = dt.replace(second=0, microsecond=0)
+                self._save_timeframe_data('order_book_1hour', dt, 60, ask_total, bid_total, price)
+            
+            # 2時間足（0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22時の00分）
+            if dt.hour % 2 == 0 and dt.minute == 0:
+                self._save_timeframe_data('order_book_2hour', dt, 120, ask_total, bid_total, price)
+            
+            # 4時間足（0, 4, 8, 12, 16, 20時の00分）
+            if dt.hour in [0, 4, 8, 12, 16, 20] and dt.minute == 0:
+                self._save_timeframe_data('order_book_4hour', dt, 240, ask_total, bid_total, price)
+            
+            # 日足（毎日00:00）
+            if dt.hour == 0 and dt.minute == 0:
+                self._save_timeframe_data('order_book_daily', dt, 1440, ask_total, bid_total, price)
                 
-                msg = f"1時間足データを保存: {hourly_timestamp.isoformat()}"
-                self.logger.info(msg)
-                if self.log_callback:
-                    self.log_callback(msg, "INFO")
-                
-                # 別スレッドで1時間足データを保存
-                thread = threading.Thread(
-                    target=self._save_hourly_data,
-                    args=(hourly_timestamp.isoformat(), ask_total, bid_total, price),
-                    daemon=True
-                )
-                thread.start()
         except Exception as e:
-            msg = f"1時間足データ保存チェックエラー: {e}"
+            msg = f"時間足データ保存チェックエラー: {e}"
             self.logger.error(msg)
             if self.log_callback:
                 self.log_callback(msg, "ERROR")
     
-    def _save_hourly_data(self, timestamp: str, ask_total: float, bid_total: float, price: float):
-        """1時間足データをSupabaseに保存"""
+    def _save_timeframe_data(self, table_name: str, dt: datetime, interval_minutes: int, 
+                            ask_total: float, bid_total: float, price: float):
+        """指定された時間足データをSupabaseに保存"""
+        try:
+            # タイムスタンプを適切な時間足に丸める
+            if interval_minutes <= 60:  # 分足の場合
+                minutes = (dt.minute // interval_minutes) * interval_minutes
+                rounded_timestamp = dt.replace(minute=minutes, second=0, microsecond=0)
+            elif interval_minutes < 1440:  # 時間足の場合
+                hours = (dt.hour // (interval_minutes // 60)) * (interval_minutes // 60)
+                rounded_timestamp = dt.replace(hour=hours, minute=0, second=0, microsecond=0)
+            else:  # 日足の場合
+                rounded_timestamp = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # 時間足の名前を取得
+            timeframe_names = {
+                'order_book_15min': '15分足',
+                'order_book_30min': '30分足',
+                'order_book_1hour': '1時間足',
+                'order_book_2hour': '2時間足',
+                'order_book_4hour': '4時間足',
+                'order_book_daily': '日足'
+            }
+            timeframe_name = timeframe_names.get(table_name, table_name)
+            
+            msg = f"{timeframe_name}データを保存: {rounded_timestamp.isoformat()}"
+            self.logger.info(msg)
+            if self.log_callback:
+                self.log_callback(msg, "INFO")
+            
+            # 別スレッドでデータを保存
+            thread = threading.Thread(
+                target=self._save_to_table,
+                args=(table_name, rounded_timestamp.isoformat(), ask_total, bid_total, price),
+                daemon=True
+            )
+            thread.start()
+            
+        except Exception as e:
+            msg = f"{table_name}データ保存エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+    
+    def _save_to_table(self, table_name: str, timestamp: str, ask_total: float, bid_total: float, price: float):
+        """指定されたテーブルにデータを保存"""
         try:
             data = {
                 "timestamp": timestamp,
@@ -159,15 +210,15 @@ class CloudSyncManager:
             }
             
             # upsert（存在する場合は更新、なければ挿入）
-            self.client.table('order_book_1hour').upsert(data).execute()
+            self.client.table(table_name).upsert(data).execute()
             
-            msg = f"1時間足データを保存しました: {timestamp}"
+            msg = f"{table_name}にデータを保存しました: {timestamp}"
             self.logger.info(msg)
             if self.log_callback:
                 self.log_callback(msg, "INFO")
                 
         except Exception as e:
-            msg = f"1時間足データ保存エラー: {e}"
+            msg = f"{table_name}保存エラー: {e}"
             self.logger.error(msg)
             if self.log_callback:
                 self.log_callback(msg, "ERROR")
