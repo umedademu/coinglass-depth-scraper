@@ -108,7 +108,7 @@ export default function Home() {
     }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <h1 style={{ fontSize: '2rem', marginBottom: '2rem', textAlign: 'center' }}>
-          Depth Viewer - BTC-USDT Order Book
+          Depth Viewer v0.800
         </h1>
         
         {loading ? (
