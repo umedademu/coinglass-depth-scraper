@@ -2,10 +2,18 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, OrderBookData } from '../lib/supabase'
+import dynamic from 'next/dynamic'
+
+// Chart.jsはSSRと互換性がないため、動的インポートを使用
+const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
+  ssr: false,
+  loading: () => <div style={{ textAlign: 'center', padding: '3rem', color: '#888' }}>グラフを読み込み中...</div>
+})
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<OrderBookData[]>([])
+  const [chartData, setChartData] = useState<OrderBookData[]>([]) // グラフ用データ（300件）
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
 
@@ -17,20 +25,29 @@ export default function Home() {
     try {
       console.log('Fetching data from Supabase...')
       
-      // 最新100件のデータを取得
-      const { data, error } = await supabase
+      // テーブル表示用：最新100件のデータを取得
+      const { data: tableData, error: tableError } = await supabase
         .from('order_book_shared')
         .select('*')
         .eq('group_id', 'default-group')
         .order('timestamp', { ascending: false })
         .limit(100)
 
-      if (error) {
-        console.error('Error fetching data:', error)
-        setError(error.message)
+      // グラフ表示用：最新300件のデータを取得
+      const { data: graphData, error: graphError } = await supabase
+        .from('order_book_shared')
+        .select('*')
+        .eq('group_id', 'default-group')
+        .order('timestamp', { ascending: false })
+        .limit(300)
+
+      if (tableError || graphError) {
+        console.error('Error fetching data:', tableError || graphError)
+        setError((tableError || graphError)?.message || 'Error fetching data')
       } else {
-        console.log('✅ Data fetched successfully:', data?.length, 'records')
-        setData(data || [])
+        console.log('✅ Data fetched successfully:', tableData?.length, 'table records,', graphData?.length, 'graph records')
+        setData(tableData || [])
+        setChartData(graphData || [])
         setLastUpdate(new Date())
       }
     } catch (err) {
@@ -49,18 +66,18 @@ export default function Home() {
     ? (latestData.bid_total / latestData.ask_total).toFixed(2)
     : '0.00'
 
-  // タイムスタンプを日本時間に変換
+  // タイムスタンプをそのまま表示（変換なし）
   const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp)
-    return date.toLocaleString('ja-JP', {
-      timeZone: 'Asia/Tokyo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
+    // ISO形式のタイムスタンプを直接パースして表示
+    // 例: "2025-08-17T02:40:00+00:00" -> "2025/08/17 02:40:00"
+    const cleanTimestamp = timestamp
+      .replace('T', ' ')
+      .split('.')[0]  // ミリ秒を除去
+      .split('+')[0]  // タイムゾーン情報を除去
+      .split('Z')[0]  // Z（UTC）を除去
+    const [datePart, timePart] = cleanTimestamp.split(' ')
+    const formattedDate = datePart.replace(/-/g, '/')
+    return `${formattedDate} ${timePart}`
   }
 
   // 価格のフォーマット
@@ -154,6 +171,13 @@ export default function Home() {
                     {bidAskRatio}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* グラフ表示 */}
+            {chartData.length > 0 && (
+              <div style={{ marginTop: '2rem', marginBottom: '2rem' }}>
+                <OrderBookChart data={chartData} />
               </div>
             )}
 
