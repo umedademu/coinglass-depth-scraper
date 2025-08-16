@@ -277,7 +277,7 @@ class CloudSyncManager:
             
             # 成功ログ（詳細化）
             dt = datetime.fromisoformat(timestamp)
-            msg = f"[{timeframe_name}] [OK] 保存成功: {dt.strftime('%Y-%m-%d %H:%M:%S')} | Ask: {ask_total:.1f} | Bid: {bid_total:.1f}"
+            msg = f"[{timeframe_name}] ✓ 保存成功: {dt.strftime('%Y-%m-%d %H:%M:%S')} | Ask: {ask_total:.1f} | Bid: {bid_total:.1f}"
             self.logger.info(msg)
             if self.log_callback:
                 self.log_callback(msg, "INFO")
