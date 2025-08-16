@@ -13,12 +13,16 @@
 - 大量データの場合、パフォーマンスが低下
 - SupabaseのVIEWでは計算負荷が高い
 - **Supabase APIの制限**: 1リクエストあたり最大1000行まで（全プラン共通）
+- **専用テーブルは書き込みのみで読み込みに使われていない**
+- **リアルタイム欠損補完により1分と5分の異なる粒度データが混在**
+- **複数ユーザー同時更新時の競合状態（レースコンディション）が発生**
 
 ### 解決策
 - デスクトップアプリ側で事前に各時間足データを集約
 - 個別テーブルにアップロードすることで高速アクセスを実現
-- デスクトップアプリが専用テーブルから直接データを読み込む方式に変更
-- 各時間足で個別に欠損データ補完を実装
+- **起動時に各時間足テーブルから1000件ずつ取得**
+- **時間足生成時に双方向の最大値同期を実装**
+- **1分足はローカルのみ、5分足以上はSupabaseと同期**
 
 ---
 
@@ -86,14 +90,14 @@ def save_1hour_data(self, data):
 
 ---
 
-### 🟡 **第2段階：全時間足の実装**（難易度：★★☆ 中）
+### 🟡 **第2段階：全時間足の実装**（難易度：★★☆ 中） ✅ 実装済み (2025/08/17)
 
 #### 実装内容
-- 15分足、30分足、2時間足、4時間足、日足テーブルの追加作成
-- 各タイミングでのデータアップロード実装
-- エラーハンドリングの追加
-- デスクトップアプリから専用テーブルへの読み込み実装
-- 各時間足での欠損データ補完機能
+- 15分足、30分足、2時間足、4時間足、日足テーブルの追加作成 ✅
+- 各タイミングでのデータアップロード実装 ✅
+- エラーハンドリングの追加 ✅
+- **専用テーブルからの読み込み実装（起動時に各1000件）** ✅ 実装済み
+- **時間足生成時の双方向最大値同期機能** ✅ 全時間足で実装済み
 
 #### 必要な作業時間
 - **約4-5時間**
@@ -279,15 +283,41 @@ class TimeframeAggregator:
         self._upsert_data('order_book_daily', rounded_time, data)
     
     def _upsert_data(self, table_name, timestamp, data):
-        """共通のUPSERT処理"""
+        """共通のUPSERT処理（双方向最大値同期付き）"""
         try:
-            self.supabase.table(table_name).upsert({
-                'timestamp': timestamp.isoformat(),
-                'ask_total': data['ask_total'],
-                'bid_total': data['bid_total'],
-                'price': data['price'],
-                'group_id': self.group_id
-            }).execute()
+            # 既存データを確認
+            existing = self.supabase.table(table_name)\
+                .select('*')\
+                .eq('timestamp', timestamp.isoformat())\
+                .eq('group_id', self.group_id)\
+                .execute()
+            
+            if existing.data:
+                # 最大値を選択してアップデート
+                existing_data = existing.data[0]
+                if data['ask_total'] > existing_data['ask_total'] or data['bid_total'] > existing_data['bid_total']:
+                    update_data = {
+                        'ask_total': max(data['ask_total'], existing_data['ask_total']),
+                        'bid_total': max(data['bid_total'], existing_data['bid_total']),
+                        'price': data['price']
+                    }
+                    self.supabase.table(table_name).update(update_data)\
+                        .eq('timestamp', timestamp.isoformat())\
+                        .eq('group_id', self.group_id)\
+                        .execute()
+                    self.logger.info(f"{table_name}: 更新 (Ask: {existing_data['ask_total']:.1f}→{update_data['ask_total']:.1f})")
+                else:
+                    self.logger.info(f"{table_name}: スキップ (既に最新)")
+            else:
+                # 新規データとして挿入
+                self.supabase.table(table_name).insert({
+                    'timestamp': timestamp.isoformat(),
+                    'ask_total': data['ask_total'],
+                    'bid_total': data['bid_total'],
+                    'price': data['price'],
+                    'group_id': self.group_id
+                }).execute()
+                self.logger.info(f"{table_name}: 新規保存")
         except Exception as e:
             self.logger.error(f"{table_name}へのデータ保存失敗: {e}")
             raise
@@ -498,13 +528,13 @@ def verify_migration():
 
 ---
 
-### 🟦 **第4段階：最適化と監視**（難易度：★★☆ 中）
+### 🟦 **第4段階：最適化と監視**（難易度：★★☆ 中） ✅ 実装済み (2025/08/17)
 
 #### 実装内容
-- リトライ機能の実装
-- ログ記録の強化
-- データ整合性チェック
-- パフォーマンス監視
+- リトライ機能の実装 ✅
+- ログ記録の強化 ✅
+- データ整合性チェック ✅
+- パフォーマンス監視 ✅
 
 #### 必要な作業時間
 - **約3-4時間**
@@ -576,14 +606,113 @@ class OptimizedAggregator(TimeframeAggregator):
 
 ---
 
+### 🔵 **第5段階：Realtimeを使った同期実装**（難易度：★★☆ 中）
+
+#### 実装内容
+- **起動時の初期データ取得**
+  - 各時間足テーブルから1000件ずつ取得
+  - ローカルDBへの格納
+- **Supabase Realtimeによる同期**
+  - 各時間足の最新タイムスタンプを監視
+  - 他ユーザーの更新をリアルタイムで受信
+  - 競合状態（レースコンディション）の解決
+- **リアルタイム欠損補完の削除**
+  - 現在の6分以上欠損補完機能を削除
+  - 異なる粒度のデータ混在問題を解決
+- **データ取得ロジックの改善**
+  - 5分足以上は専用テーブルから取得
+  - 1分足はローカルのみで管理
+
+#### 必要な作業時間
+- **約3-4時間**
+
+#### 実装例
+
+```python
+def initialize_realtime_sync(self):
+    """Realtimeによる同期の初期化"""
+    # 起動時に各時間足から1000件取得
+    self.fetch_initial_data()
+    
+    # 各時間足の最新タイムスタンプのみを監視
+    tables = [
+        'order_book_shared',    # 5分足
+        'order_book_15min',     # 15分足  
+        'order_book_30min',     # 30分足
+        'order_book_1hour',     # 1時間足
+        'order_book_2hour',     # 2時間足
+        'order_book_4hour',     # 4時間足
+        'order_book_daily'      # 日足
+    ]
+    
+    for table_name in tables:
+        # Realtime購読（最新1件のみ監視）
+        channel = self.supabase.channel(f'sync-{table_name}')
+        channel.on(
+            'postgres_changes',
+            {
+                'event': 'INSERT',
+                'schema': 'public', 
+                'table': table_name,
+                'filter': f"group_id=eq.{self.group_id}"
+            },
+            lambda payload: self.handle_realtime_update(table_name, payload)
+        )
+        channel.subscribe()
+
+def handle_realtime_update(self, table_name, payload):
+    """他ユーザーからの更新を処理"""
+    new_data = payload['new']
+    
+    # 最新タイムスタンプのデータのみ処理
+    latest_local = self.get_latest_timestamp(table_name)
+    
+    if new_data['timestamp'] > latest_local:
+        # より新しいデータなら取得して同期
+        self.fetch_and_sync_from(table_name, new_data['timestamp'])
+        self.logger.info(f"[Realtime] {table_name}: 新規データ検出・同期完了")
+
+def fetch_initial_data(self):
+    """起動時に各時間足テーブルからデータを取得"""
+    tables = [
+        ('order_book_shared', '5分足'),
+        ('order_book_15min', '15分足'),
+        ('order_book_30min', '30分足'),
+        ('order_book_1hour', '1時間足'),
+        ('order_book_2hour', '2時間足'),
+        ('order_book_4hour', '4時間足'),
+        ('order_book_daily', '日足')
+    ]
+    
+    for table_name, timeframe_name in tables:
+        try:
+            # 各1000件取得
+            result = self.supabase.table(table_name)\
+                .select('*')\
+                .eq('group_id', self.group_id)\
+                .order('timestamp', desc=True)\
+                .limit(1000)\
+                .execute()
+            
+            if result.data:
+                # ローカルDBに保存（重複チェックあり）
+                self.save_to_local_batch(result.data, table_name)
+                self.logger.info(f"{timeframe_name}: {len(result.data)}件取得")
+        except Exception as e:
+            self.logger.error(f"{timeframe_name}取得エラー: {e}")
+```
+
+---
+
 ## 📊 実装順序と期待効果
 
-| 段階 | 難易度 | 作業時間 | 期待効果 |
-|------|--------|---------|----------|
-| 第1段階 | ★☆☆ | 2-3時間 | 1時間足の高速化（12倍） |
-| 第2段階 | ★★☆ | 4-5時間 | 全時間足の高速化＋専用テーブル読み込み |
-| 第3段階 | ★★★ | 6-8時間 | 過去データの活用 |
-| 第4段階 | ★★☆ | 3-4時間 | 安定性向上 |
+| 段階 | 難易度 | 作業時間 | 期待効果 | 状態 |
+|------|--------|---------|----------|------|
+| 第1段階 | ★☆☆ | 2-3時間 | 1時間足の高速化（12倍） | ✅ 完了 |
+| 第2段階 | ★★☆ | 4-5時間 | 全時間足の書き込みと読み込み | ✅ 完了 |
+| 第3段階 | ★★★ | 6-8時間 | 過去データの活用 | ✅ 完了 |
+| 第4段階 | ★★☆ | 3-4時間 | 安定性向上 | ✅ 完了 |
+| 第5段階 | ★★☆ | 3-4時間 | Realtime同期 | ⛳ 未実装 |
 
 ## 🚀 推奨実装アプローチ
 
@@ -610,7 +739,7 @@ class OptimizedAggregator(TimeframeAggregator):
 - データ移行（第3段階）は慎重に実施
 - タイムゾーンは日本時間（JST）で統一
 - **Supabase API制限**: 1リクエストあたり最大1000行
-- **各時間足での補完可能期間（1000行制限）**:
+- **各時間足での保持期間（1000行制限）**:
   - 5分足: 約3.5日分
   - 15分足: 約10.4日分
   - 30分足: 約20.8日分
@@ -618,6 +747,21 @@ class OptimizedAggregator(TimeframeAggregator):
   - 2時間足: 約83.3日分
   - 4時間足: 約166.7日分
   - 日足: 約2.7年分
+
+## 💡 データ同期方針
+
+### 現在の実装状況
+- **1分足**: ローカルのみで管理（リアルタイムスクレイピング）✅
+- **5分足以上の書き込み**: Supabaseへの書き込み実装済み ✅
+- **全時間足の最大値比較**: 実装済み ✅
+- **専用テーブルからの読み込み**: 実装済み（fetch_initial_dataメソッド）✅
+- **リアルタイム欠損補完**: 現在は1分データで補完（問題あり）⚠️
+
+### 推奨される実装（第5段階）
+- **Supabase Realtime**: 各時間足の最新タイムスタンプを監視
+- **起動時**: 各時間足テーブルから1000件ずつ取得
+- **同期方式**: 他ユーザーの更新をリアルタイムで受信・同期
+- **欠損補完**: 削除（異なる粒度のデータ混在を防ぐ）
 
 ## 📚 関連ドキュメント
 

@@ -262,25 +262,58 @@ class CloudSyncManager:
     @retry_on_failure(max_retries=3, delay=5)
     def _save_to_table_with_retry(self, table_name: str, timeframe_name: str, timestamp: str, 
                                  ask_total: float, bid_total: float, price: float):
-        """指定されたテーブルにデータを保存（リトライ機能付き）"""
+        """指定されたテーブルにデータを保存（リトライ機能付き・最大値比較付き）"""
         try:
-            data = {
-                "timestamp": timestamp,
-                "ask_total": ask_total,
-                "bid_total": bid_total,
-                "price": price,
-                "group_id": self.group_id
-            }
+            # 既存データを確認
+            existing = self.client.table(table_name)\
+                .select('*')\
+                .eq('timestamp', timestamp)\
+                .eq('group_id', self.group_id)\
+                .execute()
             
-            # upsert（存在する場合は更新、なければ挿入）
-            self.client.table(table_name).upsert(data).execute()
-            
-            # 成功ログ（詳細化）
-            dt = datetime.fromisoformat(timestamp)
-            msg = f"[{timeframe_name}] [OK] 保存成功: {dt.strftime('%Y-%m-%d %H:%M:%S')} | Ask: {ask_total:.1f} | Bid: {bid_total:.1f}"
-            self.logger.info(msg)
-            if self.log_callback:
-                self.log_callback(msg, "INFO")
+            if existing.data:
+                # 最大値を選択してアップデート
+                existing_data = existing.data[0]
+                if ask_total > existing_data['ask_total'] or bid_total > existing_data['bid_total']:
+                    update_data = {
+                        'ask_total': max(ask_total, existing_data['ask_total']),
+                        'bid_total': max(bid_total, existing_data['bid_total']),
+                        'price': price
+                    }
+                    self.client.table(table_name)\
+                        .update(update_data)\
+                        .eq('timestamp', timestamp)\
+                        .eq('group_id', self.group_id)\
+                        .execute()
+                    
+                    # 成功ログ（詳細化）
+                    dt = datetime.fromisoformat(timestamp)
+                    msg = f"[{timeframe_name}] ✓ 更新: {dt.strftime('%Y-%m-%d %H:%M:%S')} (Ask: {existing_data['ask_total']:.1f}→{update_data['ask_total']:.1f}, Bid: {existing_data['bid_total']:.1f}→{update_data['bid_total']:.1f})"
+                    self.logger.info(msg)
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
+                else:
+                    msg = f"[{timeframe_name}] - スキップ: {timestamp} (既に最新)"
+                    self.logger.info(msg)
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
+            else:
+                # 新規データとして挿入
+                data = {
+                    "timestamp": timestamp,
+                    "ask_total": ask_total,
+                    "bid_total": bid_total,
+                    "price": price,
+                    "group_id": self.group_id
+                }
+                self.client.table(table_name).insert(data).execute()
+                
+                # 成功ログ（詳細化）
+                dt = datetime.fromisoformat(timestamp)
+                msg = f"[{timeframe_name}] ✓ 新規保存: {dt.strftime('%Y-%m-%d %H:%M:%S')} | Ask: {ask_total:.1f} | Bid: {bid_total:.1f}"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
             
             # 統計情報と最終保存時刻を更新
             self.stats['successful_saves'] += 1
@@ -591,6 +624,76 @@ class CloudSyncManager:
             if self.log_callback:
                 self.log_callback(msg, "ERROR")
             return []
+    
+    def fetch_initial_data(self) -> Dict[str, list]:
+        """起動時に各時間足テーブルからデータを取得"""
+        if not self.enabled or not self.client:
+            return {}
+        
+        tables = [
+            ('order_book_shared', '5分足'),
+            ('order_book_15min', '15分足'),
+            ('order_book_30min', '30分足'),
+            ('order_book_1hour', '1時間足'),
+            ('order_book_2hour', '2時間足'),
+            ('order_book_4hour', '4時間足'),
+            ('order_book_daily', '日足')
+        ]
+        
+        all_data = {}
+        
+        for table_name, timeframe_name in tables:
+            try:
+                msg = f"[初期データ取得] {timeframe_name}を取得中..."
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
+                
+                # 各テーブルから最新1000件を取得
+                result = self.client.table(table_name)\
+                    .select('*')\
+                    .eq('group_id', self.group_id)\
+                    .order('timestamp', desc=True)\
+                    .limit(1000)\
+                    .execute()
+                
+                if result.data:
+                    # 重複するタイムスタンプがある場合は最大値を選択
+                    consolidated_data = {}
+                    for record in result.data:
+                        ts = record['timestamp']
+                        if ts not in consolidated_data:
+                            consolidated_data[ts] = record
+                        else:
+                            # 最大値を選択
+                            existing = consolidated_data[ts]
+                            consolidated_data[ts] = {
+                                'timestamp': ts,
+                                'ask_total': max(record['ask_total'], existing['ask_total']),
+                                'bid_total': max(record['bid_total'], existing['bid_total']),
+                                'price': record['price']
+                            }
+                    
+                    all_data[table_name] = list(consolidated_data.values())
+                    msg = f"[初期データ取得] ✓ {timeframe_name}: {len(all_data[table_name])}件取得"
+                    self.logger.info(msg)
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
+                else:
+                    all_data[table_name] = []
+                    msg = f"[初期データ取得] {timeframe_name}: データなし"
+                    self.logger.info(msg)
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
+                        
+            except Exception as e:
+                msg = f"[初期データ取得] ✗ {timeframe_name}取得エラー: {e}"
+                self.logger.error(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "ERROR")
+                all_data[table_name] = []
+        
+        return all_data
     
     def get_sync_status(self) -> Dict[str, Any]:
         """同期ステータスを取得（拡張版）"""
