@@ -114,6 +114,63 @@ class CloudSyncManager:
         )
         thread.start()
         self.last_sync = datetime.now()
+        
+        # 1時間足データの保存チェック
+        self._check_and_save_hourly_data(timestamp, ask_total, bid_total, price)
+    
+    def _check_and_save_hourly_data(self, timestamp: str, ask_total: float, bid_total: float, price: float):
+        """1時間足データの保存（毎時00分のみ）"""
+        try:
+            # タイムスタンプをdatetimeオブジェクトに変換
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            
+            # 00分の場合のみ1時間足データを保存
+            if dt.minute == 0:
+                # 1時間足用のタイムスタンプ（秒・ミリ秒を0に）
+                hourly_timestamp = dt.replace(second=0, microsecond=0)
+                
+                msg = f"1時間足データを保存: {hourly_timestamp.isoformat()}"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
+                
+                # 別スレッドで1時間足データを保存
+                thread = threading.Thread(
+                    target=self._save_hourly_data,
+                    args=(hourly_timestamp.isoformat(), ask_total, bid_total, price),
+                    daemon=True
+                )
+                thread.start()
+        except Exception as e:
+            msg = f"1時間足データ保存チェックエラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+    
+    def _save_hourly_data(self, timestamp: str, ask_total: float, bid_total: float, price: float):
+        """1時間足データをSupabaseに保存"""
+        try:
+            data = {
+                "timestamp": timestamp,
+                "ask_total": ask_total,
+                "bid_total": bid_total,
+                "price": price,
+                "group_id": self.group_id
+            }
+            
+            # upsert（存在する場合は更新、なければ挿入）
+            self.client.table('order_book_1hour').upsert(data).execute()
+            
+            msg = f"1時間足データを保存しました: {timestamp}"
+            self.logger.info(msg)
+            if self.log_callback:
+                self.log_callback(msg, "INFO")
+                
+        except Exception as e:
+            msg = f"1時間足データ保存エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
     
     def _sync_to_cloud(self, timestamp: str, ask_total: float, bid_total: float, price: float):
         try:

@@ -10,10 +10,13 @@
 - Webアプリでデータ取得時に毎回グルーピング計算が必要
 - 大量データの場合、パフォーマンスが低下
 - SupabaseのVIEWでは計算負荷が高い
+- **Supabase APIの制限**: 1リクエストあたり最大1000行まで（全プラン共通）
 
 ### 解決策
 - デスクトップアプリ側で事前に各時間足データを集約
 - 個別テーブルにアップロードすることで高速アクセスを実現
+- デスクトップアプリが専用テーブルから直接データを読み込む方式に変更
+- 各時間足で個別に欠損データ補完を実装
 
 ---
 
@@ -84,9 +87,11 @@ def save_1hour_data(self, data):
 ### 🟡 **第2段階：全時間足の実装**（難易度：★★☆ 中）
 
 #### 実装内容
-- 15分足、4時間足、日足テーブルの追加作成
+- 15分足、30分足、2時間足、4時間足、日足テーブルの追加作成
 - 各タイミングでのデータアップロード実装
 - エラーハンドリングの追加
+- デスクトップアプリから専用テーブルへの読み込み実装
+- 各時間足での欠損データ補完機能
 
 #### 必要な作業時間
 - **約4-5時間**
@@ -96,6 +101,30 @@ def save_1hour_data(self, data):
 ```sql
 -- 15分足テーブル
 CREATE TABLE order_book_15min (
+  id SERIAL PRIMARY KEY,
+  timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+  ask_total NUMERIC NOT NULL,
+  bid_total NUMERIC NOT NULL,
+  price NUMERIC NOT NULL,
+  group_id VARCHAR(50) DEFAULT 'default-group',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(timestamp, group_id)
+);
+
+-- 30分足テーブル
+CREATE TABLE order_book_30min (
+  id SERIAL PRIMARY KEY,
+  timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+  ask_total NUMERIC NOT NULL,
+  bid_total NUMERIC NOT NULL,
+  price NUMERIC NOT NULL,
+  group_id VARCHAR(50) DEFAULT 'default-group',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(timestamp, group_id)
+);
+
+-- 2時間足テーブル
+CREATE TABLE order_book_2hour (
   id SERIAL PRIMARY KEY,
   timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
   ask_total NUMERIC NOT NULL,
@@ -158,10 +187,20 @@ class TimeframeAggregator:
                 self.save_15min_data(current_data)
                 self.logger.info(f"15分足データ保存: {now}")
             
+            # 30分足（00, 30分）
+            if now.minute in [0, 30]:
+                self.save_30min_data(current_data)
+                self.logger.info(f"30分足データ保存: {now}")
+            
             # 1時間足（毎時00分）
             if now.minute == 0:
                 self.save_1hour_data(current_data)
                 self.logger.info(f"1時間足データ保存: {now}")
+            
+            # 2時間足（0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22時の00分）
+            if now.hour % 2 == 0 and now.minute == 0:
+                self.save_2hour_data(current_data)
+                self.logger.info(f"2時間足データ保存: {now}")
             
             # 4時間足（0, 4, 8, 12, 16, 20時の00分）
             if now.hour in [0, 4, 8, 12, 16, 20] and now.minute == 0:
@@ -186,11 +225,33 @@ class TimeframeAggregator:
         )
         self._upsert_data('order_book_15min', rounded_time, data)
     
+    def save_30min_data(self, data):
+        """30分足データの保存"""
+        now = datetime.datetime.now()
+        rounded_time = now.replace(
+            minute=(now.minute // 30) * 30,
+            second=0,
+            microsecond=0
+        )
+        self._upsert_data('order_book_30min', rounded_time, data)
+    
     def save_1hour_data(self, data):
         """1時間足データの保存"""
         now = datetime.datetime.now()
         rounded_time = now.replace(minute=0, second=0, microsecond=0)
         self._upsert_data('order_book_1hour', rounded_time, data)
+    
+    def save_2hour_data(self, data):
+        """2時間足データの保存"""
+        now = datetime.datetime.now()
+        rounded_hour = (now.hour // 2) * 2
+        rounded_time = now.replace(
+            hour=rounded_hour,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+        self._upsert_data('order_book_2hour', rounded_time, data)
     
     def save_4hour_data(self, data):
         """4時間足データの保存"""
@@ -232,15 +293,16 @@ class TimeframeAggregator:
 
 #### アップロードタイミング表
 
-| 時間 | 分 | 5分足 | 15分足 | 1時間足 | 4時間足 | 日足 |
-|-----|-----|-------|--------|---------|---------|------|
-| 00 | 00 | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 00 | 15 | ✓ | ✓ | - | - | - |
-| 00 | 30 | ✓ | ✓ | - | - | - |
-| 00 | 45 | ✓ | ✓ | - | - | - |
-| 01 | 00 | ✓ | ✓ | ✓ | - | - |
-| 04 | 00 | ✓ | ✓ | ✓ | ✓ | - |
-| ... | ... | ✓ | ... | ... | ... | ... |
+| 時間 | 分 | 5分足 | 15分足 | 30分足 | 1時間足 | 2時間足 | 4時間足 | 日足 |
+|-----|-----|-------|--------|--------|---------|---------|---------|------|
+| 00 | 00 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 00 | 15 | ✓ | ✓ | - | - | - | - | - |
+| 00 | 30 | ✓ | ✓ | ✓ | - | - | - | - |
+| 00 | 45 | ✓ | ✓ | - | - | - | - | - |
+| 01 | 00 | ✓ | ✓ | ✓ | ✓ | - | - | - |
+| 02 | 00 | ✓ | ✓ | ✓ | ✓ | ✓ | - | - |
+| 04 | 00 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - |
+| ... | ... | ✓ | ... | ... | ... | ... | ... | ... |
 
 ---
 
@@ -305,7 +367,9 @@ class DataMigrator:
         
         # 各時間足に集約
         self._migrate_15min(df)
+        self._migrate_30min(df)
         self._migrate_1hour(df)
+        self._migrate_2hour(df)
         self._migrate_4hour(df)
         self._migrate_daily(df)
         
@@ -323,6 +387,17 @@ class DataMigrator:
         self._bulk_insert('order_book_15min', df_15min)
         self.logger.info(f"15分足: {len(df_15min)}件移行")
     
+    def _migrate_30min(self, df):
+        """30分足データの生成と保存"""
+        df_30min = df.groupby(pd.Grouper(
+            key='timestamp',
+            freq='30min',
+            label='left'
+        )).last().dropna()
+        
+        self._bulk_insert('order_book_30min', df_30min)
+        self.logger.info(f"30分足: {len(df_30min)}件移行")
+    
     def _migrate_1hour(self, df):
         """1時間足データの生成と保存"""
         df_1hour = df.groupby(pd.Grouper(
@@ -333,6 +408,17 @@ class DataMigrator:
         
         self._bulk_insert('order_book_1hour', df_1hour)
         self.logger.info(f"1時間足: {len(df_1hour)}件移行")
+    
+    def _migrate_2hour(self, df):
+        """2時間足データの生成と保存"""
+        df_2hour = df.groupby(pd.Grouper(
+            key='timestamp',
+            freq='2h',
+            label='left'
+        )).last().dropna()
+        
+        self._bulk_insert('order_book_2hour', df_2hour)
+        self.logger.info(f"2時間足: {len(df_2hour)}件移行")
     
     def _migrate_4hour(self, df):
         """4時間足データの生成と保存"""
@@ -400,8 +486,8 @@ migrator.migrate_all_timeframes(days_back=90)
 ```python
 def verify_migration():
     """移行データの検証"""
-    tables = ['order_book_15min', 'order_book_1hour', 
-              'order_book_4hour', 'order_book_daily']
+    tables = ['order_book_15min', 'order_book_30min', 'order_book_1hour',
+              'order_book_2hour', 'order_book_4hour', 'order_book_daily']
     
     for table in tables:
         count = supabase.table(table).select('*', count='exact').execute()
@@ -454,8 +540,8 @@ class OptimizedAggregator(TimeframeAggregator):
     
     def health_check(self):
         """ヘルスチェック機能"""
-        tables = ['order_book_shared', 'order_book_15min',
-                 'order_book_1hour', 'order_book_4hour', 
+        tables = ['order_book_shared', 'order_book_15min', 'order_book_30min',
+                 'order_book_1hour', 'order_book_2hour', 'order_book_4hour', 
                  'order_book_daily']
         
         results = {}
@@ -493,7 +579,7 @@ class OptimizedAggregator(TimeframeAggregator):
 | 段階 | 難易度 | 作業時間 | 期待効果 |
 |------|--------|---------|----------|
 | 第1段階 | ★☆☆ | 2-3時間 | 1時間足の高速化（12倍） |
-| 第2段階 | ★★☆ | 4-5時間 | 全時間足の高速化 |
+| 第2段階 | ★★☆ | 4-5時間 | 全時間足の高速化＋専用テーブル読み込み |
 | 第3段階 | ★★★ | 6-8時間 | 過去データの活用 |
 | 第4段階 | ★★☆ | 3-4時間 | 安定性向上 |
 
@@ -521,6 +607,15 @@ class OptimizedAggregator(TimeframeAggregator):
 - 各段階で動作確認を必ず実施
 - データ移行（第3段階）は慎重に実施
 - タイムゾーンは日本時間（JST）で統一
+- **Supabase API制限**: 1リクエストあたり最大1000行
+- **各時間足での補完可能期間（1000行制限）**:
+  - 5分足: 約3.5日分
+  - 15分足: 約10.4日分
+  - 30分足: 約20.8日分
+  - 1時間足: 約41.7日分
+  - 2時間足: 約83.3日分
+  - 4時間足: 約166.7日分
+  - 日足: 約2.7年分
 
 ## 📚 関連ドキュメント
 
