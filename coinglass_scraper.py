@@ -789,8 +789,16 @@ class ScraperGUI:
         """ログを追加"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {level}: {message}\n"
+        
+        # 現在のスクロール位置を取得（最下部にいるかチェック）
+        # yview()[1]が1.0の場合、最下部にいる
+        at_bottom = self.log_text.yview()[1] >= 0.99
+        
         self.log_text.insert(tk.END, log_entry)
-        self.log_text.see(tk.END)
+        
+        # 最下部にいた場合のみ自動スクロール
+        if at_bottom:
+            self.log_text.see(tk.END)
     
     def update_timeframe_options(self):
         """データ量に基づいて選択可能な時間足を更新"""
@@ -1052,6 +1060,44 @@ class ScraperGUI:
         except Exception as e:
             self.add_log(f"データベース初期化エラー: {str(e)}", "ERROR")
             
+    def _save_to_timeframe_table(self, table_name, timestamp, ask_total, bid_total, price):
+        """時間足専用テーブルへの保存（最大値比較付き）"""
+        try:
+            cursor = self.conn.cursor()
+            timestamp_str = timestamp.isoformat()
+            
+            # 既存データをチェック
+            cursor.execute(f"""
+                SELECT ask_total, bid_total FROM {table_name}
+                WHERE timestamp = ?
+            """, (timestamp_str,))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # 最大値を選択して更新
+                new_ask = max(ask_total, existing[0])
+                new_bid = max(bid_total, existing[1])
+                
+                if new_ask > existing[0] or new_bid > existing[1]:
+                    cursor.execute(f"""
+                        UPDATE {table_name}
+                        SET ask_total = ?, bid_total = ?, price = ?
+                        WHERE timestamp = ?
+                    """, (new_ask, new_bid, price, timestamp_str))
+                    self.add_log(f"[{table_name}] 更新: Ask={new_ask:.0f}, Bid={new_bid:.0f}", "DEBUG")
+            else:
+                # 新規挿入
+                cursor.execute(f"""
+                    INSERT INTO {table_name}
+                    (timestamp, ask_total, bid_total, price)
+                    VALUES (?, ?, ?, ?)
+                """, (timestamp_str, ask_total, bid_total, price))
+                self.add_log(f"[{table_name}] 新規保存: Ask={ask_total:.0f}, Bid={bid_total:.0f}", "DEBUG")
+                
+        except Exception as e:
+            self.add_log(f"[{table_name}] 保存エラー: {str(e)}", "ERROR")
+    
     def save_to_database(self, timestamp, ask_total, bid_total, price):
         """データをデータベースに保存"""
         try:
@@ -1059,11 +1105,52 @@ class ScraperGUI:
             rounded_timestamp = timestamp.replace(second=0, microsecond=0)
             
             cursor = self.conn.cursor()
+            
+            # 1分足データは常にorder_book_historyに保存
             cursor.execute("""
                 INSERT OR REPLACE INTO order_book_history 
                 (timestamp, ask_total, bid_total, price)
                 VALUES (?, ?, ?, ?)
             """, (rounded_timestamp.isoformat(), ask_total, bid_total, price))
+            
+            # 第2段階：時間足に応じたテーブルへの保存
+            dt = rounded_timestamp
+            
+            # 5分足への保存（分が5の倍数の場合）
+            if dt.minute % 5 == 0:
+                self._save_to_timeframe_table('order_book_5min', rounded_timestamp, ask_total, bid_total, price)
+                # 5分足は頻繁なのでDEBUGレベル
+                self.add_log(f"[5分足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "DEBUG")
+            
+            # 15分足への保存（分が15の倍数の場合）
+            if dt.minute % 15 == 0:
+                self._save_to_timeframe_table('order_book_15min', rounded_timestamp, ask_total, bid_total, price)
+                self.add_log(f"[15分足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "INFO")
+            
+            # 30分足への保存（分が30の倍数の場合）
+            if dt.minute % 30 == 0:
+                self._save_to_timeframe_table('order_book_30min', rounded_timestamp, ask_total, bid_total, price)
+                self.add_log(f"[30分足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "INFO")
+            
+            # 1時間足への保存（分が0の場合）
+            if dt.minute == 0:
+                self._save_to_timeframe_table('order_book_1hour', rounded_timestamp, ask_total, bid_total, price)
+                self.add_log(f"[1時間足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "INFO")
+                
+                # 2時間足への保存（時間が2の倍数の場合）
+                if dt.hour % 2 == 0:
+                    self._save_to_timeframe_table('order_book_2hour', rounded_timestamp, ask_total, bid_total, price)
+                    self.add_log(f"[2時間足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "INFO")
+                
+                # 4時間足への保存（時間が4の倍数の場合）
+                if dt.hour % 4 == 0:
+                    self._save_to_timeframe_table('order_book_4hour', rounded_timestamp, ask_total, bid_total, price)
+                    self.add_log(f"[4時間足DB] データを保存: {rounded_timestamp.strftime('%H:%M:%S')}", "INFO")
+                
+                # 日足への保存（0時の場合）
+                if dt.hour == 0:
+                    self._save_to_timeframe_table('order_book_daily', rounded_timestamp, ask_total, bid_total, price)
+                    self.add_log(f"[日足DB] データを保存: {rounded_timestamp.strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
             
             self.conn.commit()
             
