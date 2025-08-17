@@ -1042,15 +1042,15 @@ class ScraperGUI:
                     price
                 )
                 
-                # 5分間隔の同期タイミングで欠損チェックも実行
-                if rounded_timestamp.minute % 5 == 0:
-                    # 非同期で欠損チェックを実行（メインスレッドをブロックしない）
-                    import threading
-                    check_thread = threading.Thread(
-                        target=self.check_and_fetch_missing_data_async,
-                        daemon=True
-                    )
-                    check_thread.start()
+                # 第5段階の実装：リアルタイム欠損補完を削除
+                # 以下のコードをコメントアウト（異なる粒度のデータ混在を防ぐ）
+                # if rounded_timestamp.minute % 5 == 0:
+                #     import threading
+                #     check_thread = threading.Thread(
+                #         target=self.check_and_fetch_missing_data_async,
+                #         daemon=True
+                #     )
+                #     check_thread.start()
             
             # 300日以上前のデータを削除
             cutoff_date = (datetime.now() - timedelta(days=300)).isoformat()
@@ -1086,121 +1086,65 @@ class ScraperGUI:
             self.root.after(5000, self.update_sync_status)
     
     def check_and_fetch_missing_data_async(self):
-        """非同期で欠損データをチェックして取得（全データをチェック）"""
-        try:
-            # クラウド同期が有効でない場合はスキップ
-            if not hasattr(self, 'cloud_sync') or not self.cloud_sync or not self.cloud_sync.enabled:
-                return
-                
-            self.add_log("定期的な全データ同期を実行中...")
-            
-            # 全データの同期を実行
-            self.fetch_missing_data_from_cloud()
-            
-            # 最新データから現在時刻までの欠損もチェック（従来の処理）
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                SELECT MAX(timestamp) FROM order_book_history
-            """)
-            result = cursor.fetchone()
-            
-            if result and result[0]:
-                last_timestamp = datetime.fromisoformat(result[0])
-                now = datetime.now()
-                
-                # 最新データから現在時刻までの欠損期間をチェック
-                time_diff = (now - last_timestamp).total_seconds()
-                
-                if time_diff > 360:  # 6分以上の欠損がある場合
-                    self.add_log(f"最新データから{int(time_diff/60)}分間の欠損を検出。クラウドから取得中...")
-                    
-                    # 欠損データを取得
-                    missing_data = self.cloud_sync.fetch_missing_data(
-                        last_timestamp + timedelta(minutes=1),
-                        now
-                    )
-                    
-                    if missing_data:
-                        inserted_count = 0
-                        for record in missing_data:
-                            try:
-                                # ローカルDBに保存（既存データはスキップ）
-                                # Supabaseのタイムスタンプからタイムゾーンを除去
-                                timestamp_str = record['timestamp']
-                                if '+' in timestamp_str or 'T' in timestamp_str:
-                                    # ISO形式のタイムスタンプをパース
-                                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                                    # タイムゾーンを削除してローカルタイムとして保存
-                                    timestamp_str = dt.replace(tzinfo=None).isoformat()
-                                
-                                cursor.execute("""
-                                    INSERT OR IGNORE INTO order_book_history 
-                                    (timestamp, ask_total, bid_total, price)
-                                    VALUES (?, ?, ?, ?)
-                                """, (
-                                    timestamp_str,
-                                    record['ask_total'],
-                                    record['bid_total'],
-                                    record['price']
-                                ))
-                                
-                                if cursor.rowcount > 0:
-                                    inserted_count += 1
-                                    
-                            except Exception as e:
-                                self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
-                        
-                        if inserted_count > 0:
-                            self.conn.commit()
-                            self.add_log(f"最新データの欠損チェックで{inserted_count}件のデータを補完しました")
-                            
-        except Exception as e:
-            self.add_log(f"欠損チェックエラー: {str(e)}", "WARNING")
+        """非同期で欠損データをチェックして取得（リアルタイム欠損補完は無効化）"""
+        # 第5段階の実装：リアルタイム欠損補完を削除
+        # 異なる粒度のデータ混在を防ぐため、6分以上の欠損補完機能を無効化
+        return
     
-    def fetch_missing_data_from_cloud(self):
-        """クラウドから欠損データを取得（全データをチェック）"""
+    def fetch_initial_timeframe_data(self):
+        """各時間足テーブルから初期データを取得してローカルDBに保存"""
         try:
+            # cloud_syncのfetch_initial_dataメソッドを持っている
+            all_timeframe_data = self.cloud_sync.fetch_initial_data()
+            
+            if not all_timeframe_data:
+                self.add_log("時間足データの取得に失敗しました", "WARNING")
+                return
+            
             cursor = self.conn.cursor()
+            total_inserted = 0
             
-            # ローカルDBの全タイムスタンプを取得
-            cursor.execute("""
-                SELECT DISTINCT timestamp FROM order_book_history
-            """)
-            local_timestamps = set(row[0] for row in cursor.fetchall())
-            
-            self.add_log("Supabaseから全データを取得してローカルDBと照合中...")
-            
-            # Supabaseから全データを取得
-            all_cloud_data = self.cloud_sync.fetch_all_data()
-            
-            if all_cloud_data:
-                # ローカルに存在しないデータをフィルタリング
-                missing_data = []
-                for record in all_cloud_data:
-                    # タイムスタンプからタイムゾーン情報を除去してチェック
-                    timestamp_str = record['timestamp']
-                    if '+' in timestamp_str or 'T' in timestamp_str:
-                        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                        timestamp_str = dt.replace(tzinfo=None).isoformat()
+            # 各時間足のデータをローカルDBに保存
+            for table_name, records in all_timeframe_data.items():
+                if not records:
+                    continue
                     
-                    if timestamp_str not in local_timestamps:
-                        missing_data.append(record)
-                
-                if missing_data:
-                    inserted_count = 0
-                    for record in missing_data:
-                        try:
-                            # ローカルDBに保存（タイムゾーン情報を削除）
-                            # Supabaseのタイムスタンプからタイムゾーンを除去
-                            timestamp_str = record['timestamp']
-                            if '+' in timestamp_str or 'T' in timestamp_str:
-                                # ISO形式のタイムスタンプをパース
-                                dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                                # タイムゾーンを削除してローカルタイムとして保存
-                                timestamp_str = dt.replace(tzinfo=None).isoformat()
-                            
+                table_inserted = 0
+                for record in records:
+                    try:
+                        # タイムスタンプからタイムゾーン情報を除去
+                        timestamp_str = record['timestamp']
+                        if '+' in timestamp_str or 'T' in timestamp_str:
+                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            timestamp_str = dt.replace(tzinfo=None).isoformat()
+                        
+                        # 既存データをチェック
+                        cursor.execute("""
+                            SELECT ask_total, bid_total FROM order_book_history
+                            WHERE timestamp = ?
+                        """, (timestamp_str,))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # 最大値を選択して更新
+                            if record['ask_total'] > existing[0] or record['bid_total'] > existing[1]:
+                                cursor.execute("""
+                                    UPDATE order_book_history 
+                                    SET ask_total = ?, bid_total = ?, price = ?
+                                    WHERE timestamp = ?
+                                """, (
+                                    max(record['ask_total'], existing[0]),
+                                    max(record['bid_total'], existing[1]),
+                                    record['price'],
+                                    timestamp_str
+                                ))
+                                if cursor.rowcount > 0:
+                                    table_inserted += 1
+                        else:
+                            # 新規挿入
                             cursor.execute("""
-                                INSERT OR REPLACE INTO order_book_history 
+                                INSERT INTO order_book_history 
                                 (timestamp, ask_total, bid_total, price)
                                 VALUES (?, ?, ?, ?)
                             """, (
@@ -1209,32 +1153,55 @@ class ScraperGUI:
                                 record['bid_total'],
                                 record['price']
                             ))
-                            
-                            # メモリ上の履歴にも追加（タイムゾーンなしで統一）
-                            timestamp = datetime.fromisoformat(timestamp_str)
-                            self.time_history.append(timestamp)
-                            self.ask_history.append(record['ask_total'])
-                            self.bid_history.append(record['bid_total'])
-                            inserted_count += 1
-                            
-                        except Exception as e:
-                            self.add_log(f"データ挿入エラー: {str(e)}", "ERROR")
-                    
-                    if inserted_count > 0:
-                            self.conn.commit()
-                            self.add_log(f"クラウドから{inserted_count}件のデータを取得しました")
-                            
-                            # 時系列順にソート
-                            self.sort_history_data()
-                            
-                            # UIを更新
-                            self.update_timeframe_options()
-                            self.update_graph()
-                    else:
-                        self.add_log("クラウドに欠損データはありません")
-                        
+                            if cursor.rowcount > 0:
+                                table_inserted += 1
+                                
+                                # メモリ上の履歴にも追加
+                                timestamp = datetime.fromisoformat(timestamp_str)
+                                self.time_history.append(timestamp)
+                                self.ask_history.append(record['ask_total'])
+                                self.bid_history.append(record['bid_total'])
+                                
+                    except Exception as e:
+                        # 個別のレコードエラーは継続
+                        continue
+                
+                if table_inserted > 0:
+                    # テーブル名から時間足名を取得
+                    timeframe_names = {
+                        'order_book_shared': '5分足',
+                        'order_book_15min': '15分足',
+                        'order_book_30min': '30分足',
+                        'order_book_1hour': '1時間足',
+                        'order_book_2hour': '2時間足',
+                        'order_book_4hour': '4時間足',
+                        'order_book_daily': '日足'
+                    }
+                    timeframe_name = timeframe_names.get(table_name, table_name)
+                    self.add_log(f"{timeframe_name}: {table_inserted}件のデータをローカルDBに保存")
+                    total_inserted += table_inserted
+            
+            if total_inserted > 0:
+                self.conn.commit()
+                self.add_log(f"合計{total_inserted}件の時間足データをローカルDBに保存しました")
+                
+                # 時系列順にソート
+                self.sort_history_data()
+                
+                # UIを更新
+                self.update_timeframe_options()
+                self.update_graph()
+            else:
+                self.add_log("新しい時間足データはありませんでした")
+                
         except Exception as e:
-            self.add_log(f"クラウドデータ取得エラー: {str(e)}", "WARNING")
+            self.add_log(f"時間足データ取得エラー: {str(e)}", "ERROR")
+    
+    def fetch_missing_data_from_cloud(self):
+        """（無効化）クラウドから欠損データを取得"""
+        # 第5段階の実装：リアルタイム欠損補完を削除
+        # このメソッドは使用しません
+        return
     
     def load_historical_data(self):
         """起動時に過去のデータを読み込む"""
@@ -1272,9 +1239,10 @@ class ScraperGUI:
             else:
                 self.add_log("過去のデータはありません")
             
-            # クラウドから欠損データを取得
+            # クラウドから各時間足の初期データを取得
             if hasattr(self, 'cloud_sync') and self.cloud_sync and self.cloud_sync.enabled:
-                self.fetch_missing_data_from_cloud()
+                self.add_log("各時間足テーブルから初期データを取得中...")
+                self.fetch_initial_timeframe_data()
                 
             # 最後に必ず時系列順にソート（クラウドデータと統合後）
             if len(self.time_history) > 0:
