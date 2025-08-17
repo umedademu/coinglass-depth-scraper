@@ -41,3 +41,4 @@ installer_output/*.exe
 # Configuration files (keep example)
 config.json
 node_modules/
+depth-viewer-old/

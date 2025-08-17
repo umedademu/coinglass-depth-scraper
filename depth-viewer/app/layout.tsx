@@ -1,6 +1,12 @@
-export const metadata = {
+import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
+
+const inter = Inter({ subsets: ['latin'] })
+
+export const metadata: Metadata = {
   title: 'Depth Viewer',
-  description: 'Test page for depth-viewer project',
+  description: 'BTC-USDT Order Book Visualization',
 }
 
 export default function RootLayout({
@@ -10,7 +16,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body className={inter.className}>{children}</body>
     </html>
   )
 }
