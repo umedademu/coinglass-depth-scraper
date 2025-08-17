@@ -10,6 +10,7 @@ from tkinter import ttk, scrolledtext
 import threading
 import time
 from datetime import datetime, timedelta
+from typing import Dict
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -572,7 +573,10 @@ class ScraperGUI:
         
         # UIセットアップ後にクラウド同期を初期化
         try:
-            self.cloud_sync = CloudSyncManager(log_callback=self.add_log)
+            self.cloud_sync = CloudSyncManager(
+                log_callback=self.add_log,
+                local_db_callback=self.save_realtime_data_to_local_db
+            )
             if self.cloud_sync.enabled:
                 self.add_log("クラウド同期機能が有効です", "INFO")
         except Exception as e:
@@ -1156,11 +1160,12 @@ class ScraperGUI:
                             if cursor.rowcount > 0:
                                 table_inserted += 1
                                 
-                                # メモリ上の履歴にも追加
-                                timestamp = datetime.fromisoformat(timestamp_str)
-                                self.time_history.append(timestamp)
-                                self.ask_history.append(record['ask_total'])
-                                self.bid_history.append(record['bid_total'])
+                                # メモリ上の履歴にも追加（5分足以上のデータは追加しない）
+                                # 第6段階修正：1分足グラフ用配列への混入を防ぐためコメントアウト
+                                # timestamp = datetime.fromisoformat(timestamp_str)
+                                # self.time_history.append(timestamp)
+                                # self.ask_history.append(record['ask_total'])
+                                # self.bid_history.append(record['bid_total'])
                                 
                     except Exception as e:
                         # 個別のレコードエラーは継続
@@ -1203,6 +1208,161 @@ class ScraperGUI:
         # このメソッドは使用しません
         return
     
+    def get_latest_timestamps_for_all_tables(self) -> Dict[str, str]:
+        """各時間足テーブルに対応するローカルDBの最新タイムスタンプを取得"""
+        try:
+            timestamps = {}
+            cursor = self.conn.cursor()
+            
+            # 各時間足に対応する時間間隔（分単位）
+            timeframe_intervals = {
+                'order_book_shared': 5,    # 5分足
+                'order_book_15min': 15,    # 15分足
+                'order_book_30min': 30,    # 30分足
+                'order_book_1hour': 60,    # 1時間足
+                'order_book_2hour': 120,   # 2時間足
+                'order_book_4hour': 240,   # 4時間足
+                'order_book_daily': 1440   # 日足
+            }
+            
+            for table_name, interval_minutes in timeframe_intervals.items():
+                # それぞれの時間足に該当するデータをフィルタリングして最新を取得
+                if interval_minutes <= 60:  # 分足・時間足
+                    # 分が間隔で割り切れるデータをフィルタリング
+                    cursor.execute("""
+                        SELECT timestamp FROM order_book_history
+                        WHERE strftime('%M', timestamp) % ? = 0
+                        AND strftime('%S', timestamp) = '00'
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """, (interval_minutes,))
+                elif interval_minutes < 1440:  # 時間足（2時間、4時間）
+                    # 時間が間隔で割り切れるデータをフィルタリング
+                    hours_interval = interval_minutes // 60
+                    cursor.execute("""
+                        SELECT timestamp FROM order_book_history
+                        WHERE strftime('%H', timestamp) % ? = 0
+                        AND strftime('%M', timestamp) = '00'
+                        AND strftime('%S', timestamp) = '00'
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """, (hours_interval,))
+                else:  # 日足
+                    # 00:00:00のデータをフィルタリング
+                    cursor.execute("""
+                        SELECT timestamp FROM order_book_history
+                        WHERE strftime('%H:%M:%S', timestamp) = '00:00:00'
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    """)
+                
+                result = cursor.fetchone()
+                if result:
+                    timestamps[table_name] = result[0]
+                else:
+                    timestamps[table_name] = None
+            
+            return timestamps
+            
+        except Exception as e:
+            self.add_log(f"最新タイムスタンプ取得エラー: {str(e)}", "ERROR")
+            return {}
+    
+    def save_realtime_data_to_local_db(self, table_name: str, records: list):
+        """Realtime同期で取得したデータをローカルDBに保存"""
+        try:
+            if not records:
+                return
+            
+            cursor = self.conn.cursor()
+            saved_count = 0
+            
+            for record in records:
+                try:
+                    # タイムスタンプからタイムゾーン情報を除去
+                    timestamp_str = record['timestamp']
+                    if '+' in timestamp_str or 'T' in timestamp_str:
+                        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        timestamp_str = dt.replace(tzinfo=None).isoformat()
+                    
+                    # 既存データをチェック
+                    cursor.execute("""
+                        SELECT ask_total, bid_total FROM order_book_history
+                        WHERE timestamp = ?
+                    """, (timestamp_str,))
+                    
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # 最大値を選択して更新
+                        if record['ask_total'] > existing[0] or record['bid_total'] > existing[1]:
+                            cursor.execute("""
+                                UPDATE order_book_history 
+                                SET ask_total = ?, bid_total = ?, price = ?
+                                WHERE timestamp = ?
+                            """, (
+                                max(record['ask_total'], existing[0]),
+                                max(record['bid_total'], existing[1]),
+                                record['price'],
+                                timestamp_str
+                            ))
+                            if cursor.rowcount > 0:
+                                saved_count += 1
+                    else:
+                        # 新規挿入
+                        cursor.execute("""
+                            INSERT INTO order_book_history 
+                            (timestamp, ask_total, bid_total, price)
+                            VALUES (?, ?, ?, ?)
+                        """, (
+                            timestamp_str,
+                            record['ask_total'],
+                            record['bid_total'],
+                            record['price']
+                        ))
+                        if cursor.rowcount > 0:
+                            saved_count += 1
+                            
+                            # メモリ上の履歴にも追加（Realtime同期データは追加しない）
+                            # 第6段階修正：1分足グラフ用配列への混入を防ぐためコメントアウト
+                            # timestamp = datetime.fromisoformat(timestamp_str)
+                            # self.time_history.append(timestamp)
+                            # self.ask_history.append(record['ask_total'])
+                            # self.bid_history.append(record['bid_total'])
+                            
+                except Exception as e:
+                    # 個別のレコードエラーは継続
+                    continue
+            
+            if saved_count > 0:
+                self.conn.commit()
+                
+                # テーブル名から時間足名を取得
+                timeframe_names = {
+                    'order_book_shared': '5分足',
+                    'order_book_15min': '15分足',
+                    'order_book_30min': '30分足',
+                    'order_book_1hour': '1時間足',
+                    'order_book_2hour': '2時間足',
+                    'order_book_4hour': '4時間足',
+                    'order_book_daily': '日足'
+                }
+                timeframe_name = timeframe_names.get(table_name, table_name)
+                
+                self.add_log(f"[Realtime同期] {timeframe_name}: {saved_count}件をローカルDBに保存")
+                
+                # 最新タイムスタンプをCloudSyncManagerに通知
+                if self.cloud_sync and records:
+                    # 最後のレコードのタイムスタンプを使用
+                    latest_timestamp = max(r['timestamp'] for r in records)
+                    self.cloud_sync.update_latest_timestamps(table_name, latest_timestamp)
+                
+                # グラフを更新（UIスレッドで実行）
+                self.root.after(100, self.update_graph)
+                
+        except Exception as e:
+            self.add_log(f"[Realtime同期] データ保存エラー: {str(e)}", "ERROR")
+    
     def load_historical_data(self):
         """起動時に過去のデータを読み込む"""
         try:
@@ -1243,6 +1403,16 @@ class ScraperGUI:
             if hasattr(self, 'cloud_sync') and self.cloud_sync and self.cloud_sync.enabled:
                 self.add_log("各時間足テーブルから初期データを取得中...")
                 self.fetch_initial_timeframe_data()
+                
+                # ローカルDBの最新タイムスタンプを取得してCloudSyncManagerに通知
+                latest_timestamps = self.get_latest_timestamps_for_all_tables()
+                self.cloud_sync.initialize_latest_timestamps(latest_timestamps)
+                
+                # Realtime同期を開始
+                if self.cloud_sync.setup_realtime_sync(self.save_realtime_data_to_local_db):
+                    self.add_log("Realtime同期を開始しました", "INFO")
+                else:
+                    self.add_log("Realtime同期の開始に失敗しました", "WARNING")
                 
             # 最後に必ず時系列順にソート（クラウドデータと統合後）
             if len(self.time_history) > 0:
@@ -1566,6 +1736,15 @@ class ScraperGUI:
         """アプリケーションを完全に終了"""
         self.scraper.is_running = False
         self.scraper.close_driver()
+        
+        # Realtime接続をクリーンアップ
+        if hasattr(self, 'cloud_sync') and self.cloud_sync:
+            try:
+                self.cloud_sync.cleanup_realtime()
+                self.add_log("Realtime接続をクリーンアップしました")
+            except Exception as e:
+                # print(f"Realtimeクリーンアップエラー: {str(e)}")
+                pass
         
         # トレイアイコンを停止
         if self.tray_icon:

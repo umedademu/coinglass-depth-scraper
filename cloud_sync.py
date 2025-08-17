@@ -43,10 +43,11 @@ def retry_on_failure(max_retries: int = 3, delay: int = 5):
     return decorator
 
 class CloudSyncManager:
-    def __init__(self, config_path: str = None, log_callback=None):
+    def __init__(self, config_path: str = None, log_callback=None, local_db_callback=None):
         # loggerを最初に初期化
         self.logger = logging.getLogger(__name__)
         self.log_callback = log_callback
+        self.local_db_callback = local_db_callback  # ローカルDBへの保存用コールバック
         
         # config_pathが指定されていない場合は、AppDataから読み込む
         if config_path is None:
@@ -87,8 +88,14 @@ class CloudSyncManager:
             'successful_saves': 0,
             'failed_saves': 0,
             'retry_count': 0,
-            'last_health_check': None
+            'last_health_check': None,
+            'realtime_updates': 0  # Realtime同期のカウンター追加
         }
+        
+        # Realtime関連の初期化
+        self.realtime_channels = {}  # チャンネルを格納する辞書
+        self.latest_timestamps = {}  # 各テーブルの最新タイムスタンプ
+        self.realtime_enabled = self.config.get("cloud_sync", {}).get("realtime_enabled", True)
         
         if self.enabled and SUPABASE_AVAILABLE:
             self._initialize_client()
@@ -710,3 +717,235 @@ class CloudSyncManager:
         status['statistics'] = self.get_statistics()
         
         return status
+    
+    def setup_realtime_sync(self, local_db_callback=None):
+        """Realtime同期の設定"""
+        if not self.enabled or not self.client or not self.realtime_enabled:
+            return False
+            
+        # ローカルDB保存用コールバックを設定
+        if local_db_callback:
+            self.local_db_callback = local_db_callback
+            
+        tables = [
+            ('order_book_shared', '5分足'),
+            ('order_book_15min', '15分足'),
+            ('order_book_30min', '30分足'),
+            ('order_book_1hour', '1時間足'),
+            ('order_book_2hour', '2時間足'),
+            ('order_book_4hour', '4時間足'),
+            ('order_book_daily', '日足')
+        ]
+        
+        try:
+            for table_name, timeframe_name in tables:
+                # チャンネル名を作成
+                channel_name = f'sync-{table_name}-{self.group_id}'
+                
+                # Realtime購読を設定
+                channel = self.client.channel(channel_name)
+                
+                # INSERT/UPDATEイベントを監視
+                def create_handler(tn, tfn):
+                    def handler(payload):
+                        self.handle_realtime_update(tn, tfn, payload)
+                    return handler
+                
+                channel.on(
+                    'postgres_changes',
+                    {
+                        'event': '*',  # INSERT, UPDATE, DELETEすべてを監視
+                        'schema': 'public',
+                        'table': table_name,
+                        'filter': f'group_id=eq.{self.group_id}'
+                    },
+                    create_handler(table_name, timeframe_name)
+                ).subscribe()
+                
+                self.realtime_channels[table_name] = channel
+                
+                msg = f"[Realtime] {timeframe_name}の監視を開始しました"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
+            
+            return True
+            
+        except Exception as e:
+            msg = f"[Realtime] セットアップエラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+            return False
+    
+    def handle_realtime_update(self, table_name: str, timeframe_name: str, payload: Dict[str, Any]):
+        """他ユーザーからの更新を処理"""
+        try:
+            event_type = payload.get('event_type', 'UNKNOWN')
+            
+            # INSERT/UPDATEイベントの場合
+            if event_type in ['INSERT', 'UPDATE']:
+                new_data = payload.get('new', {})
+                
+                if not new_data:
+                    return
+                
+                # タイムスタンプを取得
+                new_timestamp = new_data.get('timestamp')
+                if not new_timestamp:
+                    return
+                
+                # 最新タイムスタンプを確認
+                if table_name not in self.latest_timestamps:
+                    self.latest_timestamps[table_name] = self._get_latest_local_timestamp(table_name)
+                
+                latest_local = self.latest_timestamps[table_name]
+                
+                # より新しいデータの場合
+                if not latest_local or new_timestamp > latest_local:
+                    # ギャップデータを取得
+                    gap_data = self.fetch_gap_data(table_name, latest_local, new_timestamp)
+                    
+                    if gap_data:
+                        # ローカルDBに保存（コールバック経由）
+                        if self.local_db_callback:
+                            self.local_db_callback(table_name, gap_data)
+                        
+                        # 最新タイムスタンプを更新
+                        self.latest_timestamps[table_name] = new_timestamp
+                        
+                        # 統計情報を更新
+                        self.stats['realtime_updates'] += len(gap_data)
+                        
+                        msg = f"[Realtime] {timeframe_name}: {len(gap_data)}件の新規データを同期"
+                        self.logger.info(msg)
+                        if self.log_callback:
+                            self.log_callback(msg, "INFO")
+                
+        except Exception as e:
+            msg = f"[Realtime] {timeframe_name}更新処理エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+    
+    def fetch_gap_data(self, table_name: str, start_timestamp: Optional[str], end_timestamp: str) -> list:
+        """指定期間のギャップデータを取得"""
+        if not self.enabled or not self.client:
+            return []
+        
+        try:
+            query = self.client.table(table_name)\
+                .select('*')\
+                .eq('group_id', self.group_id)
+            
+            # 開始タイムスタンプがある場合
+            if start_timestamp:
+                query = query.gt('timestamp', start_timestamp)
+            
+            # 終了タイムスタンプまで
+            query = query.lte('timestamp', end_timestamp)\
+                .order('timestamp')\
+                .limit(100)  # 一度に100件まで
+            
+            result = query.execute()
+            
+            if result.data:
+                # 重複するタイムスタンプがある場合は最大値を選択
+                consolidated_data = {}
+                for record in result.data:
+                    ts = record['timestamp']
+                    if ts not in consolidated_data:
+                        consolidated_data[ts] = record
+                    else:
+                        # 最大値を選択
+                        existing = consolidated_data[ts]
+                        consolidated_data[ts] = {
+                            'timestamp': ts,
+                            'ask_total': max(record['ask_total'], existing['ask_total']),
+                            'bid_total': max(record['bid_total'], existing['bid_total']),
+                            'price': record['price']
+                        }
+                
+                return list(consolidated_data.values())
+            
+            return []
+            
+        except Exception as e:
+            msg = f"[Realtime] ギャップデータ取得エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+            return []
+    
+    def _get_latest_local_timestamp(self, table_name: str) -> Optional[str]:
+        """ローカルの最新タイムスタンプを取得（プレースホルダー）"""
+        # この関数は実際にはcoinglass_scraper.py側で実装される
+        # ここでは最初にキャッシュからのみ返す
+        return self.latest_timestamps.get(table_name)
+    
+    def update_latest_timestamps(self, table_name: str, timestamp: str):
+        """各テーブルの最新タイムスタンプを更新"""
+        try:
+            # 現在の最新タイムスタンプと比較
+            current = self.latest_timestamps.get(table_name)
+            if not current or timestamp > current:
+                self.latest_timestamps[table_name] = timestamp
+                
+                # テーブル名から時間足名を取得
+                timeframe_names = {
+                    'order_book_shared': '5分足',
+                    'order_book_15min': '15分足',
+                    'order_book_30min': '30分足',
+                    'order_book_1hour': '1時間足',
+                    'order_book_2hour': '2時間足',
+                    'order_book_4hour': '4時間足',
+                    'order_book_daily': '日足'
+                }
+                timeframe_name = timeframe_names.get(table_name, table_name)
+                
+                msg = f"[Realtime] {timeframe_name}の最新タイムスタンプを更新: {timestamp}"
+                self.logger.debug(msg)
+                
+        except Exception as e:
+            msg = f"[Realtime] タイムスタンプ更新エラー: {e}"
+            self.logger.error(msg)
+    
+    def initialize_latest_timestamps(self, timestamps_dict: Dict[str, str]):
+        """起動時に各テーブルの最新タイムスタンプを初期化"""
+        try:
+            for table_name, timestamp in timestamps_dict.items():
+                if timestamp:
+                    self.latest_timestamps[table_name] = timestamp
+                    
+            msg = f"[Realtime] 最新タイムスタンプを初期化しました: {len(self.latest_timestamps)}テーブル"
+            self.logger.info(msg)
+            if self.log_callback:
+                self.log_callback(msg, "INFO")
+                
+        except Exception as e:
+            msg = f"[Realtime] タイムスタンプ初期化エラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
+    
+    def cleanup_realtime(self):
+        """Realtime接続のクリーンアップ"""
+        try:
+            for table_name, channel in self.realtime_channels.items():
+                try:
+                    channel.unsubscribe()
+                    msg = f"[Realtime] {table_name}の監視を停止しました"
+                    self.logger.info(msg)
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
+                except Exception as e:
+                    msg = f"[Realtime] {table_name}のクリーンアップエラー: {e}"
+                    self.logger.warning(msg)
+            
+            self.realtime_channels.clear()
+            
+        except Exception as e:
+            msg = f"[Realtime] クリーンアップエラー: {e}"
+            self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
