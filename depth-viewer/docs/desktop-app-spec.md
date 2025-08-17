@@ -90,14 +90,13 @@ def save_1hour_data(self, data):
 
 ---
 
-### 🟡 **第2段階：全時間足の実装**（難易度：★★☆ 中） ✅ 実装済み (2025/08/17)
+### 🟡 **第2段階：全時間足への書き込み実装**（難易度：★★☆ 中） ✅ 実装済み (2025/08/17)
 
 #### 実装内容
 - 15分足、30分足、2時間足、4時間足、日足テーブルの追加作成 ✅
 - 各タイミングでのデータアップロード実装 ✅
 - エラーハンドリングの追加 ✅
-- **専用テーブルからの読み込み実装（起動時に各1000件）** ✅ 実装済み
-- **時間足生成時の双方向最大値同期機能** ✅ 全時間足で実装済み
+- **時間足生成時の最大値比較機能** ✅ 全時間足で実装済み
 
 #### 必要な作業時間
 - **約4-5時間**
@@ -606,16 +605,12 @@ class OptimizedAggregator(TimeframeAggregator):
 
 ---
 
-### 🔵 **第5段階：Realtimeを使った同期実装**（難易度：★★☆ 中）
+### 🔵 **第5段階：専用テーブルからの読み込み実装**（難易度：★☆☆ 簡単）
 
 #### 実装内容
 - **起動時の初期データ取得**
   - 各時間足テーブルから1000件ずつ取得
   - ローカルDBへの格納
-- **Supabase Realtimeによる同期**
-  - 各時間足の最新タイムスタンプを監視
-  - 他ユーザーの更新をリアルタイムで受信
-  - 競合状態（レースコンディション）の解決
 - **リアルタイム欠損補完の削除**
   - 現在の6分以上欠損補完機能を削除
   - 異なる粒度のデータ混在問題を解決
@@ -624,17 +619,95 @@ class OptimizedAggregator(TimeframeAggregator):
   - 1分足はローカルのみで管理
 
 #### 必要な作業時間
+- **約2-3時間**
+
+#### 実装例
+
+```python
+def initialize_at_startup(self):
+    """起動時の初期化処理"""
+    # 各時間足テーブルからデータを取得
+    initial_data = self.fetch_initial_data()
+    
+    # ローカルDBに保存
+    for table_name, records in initial_data.items():
+        self.save_to_local_db(table_name, records)
+        self.logger.info(f"{table_name}: {len(records)}件をローカルDBに保存")
+    
+    # リアルタイム欠損補完を無効化
+    self.disable_realtime_gap_fill = True
+    
+def fetch_initial_data(self):
+    """各時間足テーブルからデータを取得（既に実装済み）"""
+    # cloud_sync.pyの既存メソッドを使用
+    return super().fetch_initial_data()
+
+def save_to_local_db(self, table_name, records):
+    """ローカルSQLiteデータベースに保存"""
+    cursor = self.conn.cursor()
+    
+    for record in records:
+        # 既存データをチェック
+        cursor.execute("""
+            SELECT ask_total, bid_total FROM order_book_history
+            WHERE timestamp = ? AND timeframe = ?
+        """, (record['timestamp'], self.get_timeframe_name(table_name)))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 最大値を選択して更新
+            if record['ask_total'] > existing[0] or record['bid_total'] > existing[1]:
+                cursor.execute("""
+                    UPDATE order_book_history 
+                    SET ask_total = ?, bid_total = ?, price = ?
+                    WHERE timestamp = ? AND timeframe = ?
+                """, (
+                    max(record['ask_total'], existing[0]),
+                    max(record['bid_total'], existing[1]),
+                    record['price'],
+                    record['timestamp'],
+                    self.get_timeframe_name(table_name)
+                ))
+        else:
+            # 新規挿入
+            cursor.execute("""
+                INSERT INTO order_book_history 
+                (timestamp, ask_total, bid_total, price, timeframe)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                record['timestamp'],
+                record['ask_total'],
+                record['bid_total'],
+                record['price'],
+                self.get_timeframe_name(table_name)
+            ))
+    
+    self.conn.commit()
+```
+
+---
+
+### 🟣 **第6段階：Realtime同期実装**（難易度：★★☆ 中）
+
+#### 実装内容
+- **Supabase Realtimeによる同期**
+  - 各時間足の最新タイムスタンプを監視
+  - 他ユーザーの更新をリアルタイムで受信
+  - 競合状態（レースコンディション）の解決
+- **効率的な同期戦略**
+  - 最新1件のみを監視（データ量を最小化）
+  - 新規データ検出時のみ差分取得
+  - WebSocket接続の管理
+
+#### 必要な作業時間
 - **約3-4時間**
 
 #### 実装例
 
 ```python
-def initialize_realtime_sync(self):
-    """Realtimeによる同期の初期化"""
-    # 起動時に各時間足から1000件取得
-    self.fetch_initial_data()
-    
-    # 各時間足の最新タイムスタンプのみを監視
+def setup_realtime_sync(self):
+    """Realtime同期の設定"""
     tables = [
         'order_book_shared',    # 5分足
         'order_book_15min',     # 15分足  
@@ -659,47 +732,35 @@ def initialize_realtime_sync(self):
             lambda payload: self.handle_realtime_update(table_name, payload)
         )
         channel.subscribe()
+        self.logger.info(f"[Realtime] {table_name}の監視を開始")
 
 def handle_realtime_update(self, table_name, payload):
     """他ユーザーからの更新を処理"""
     new_data = payload['new']
     
     # 最新タイムスタンプのデータのみ処理
-    latest_local = self.get_latest_timestamp(table_name)
+    latest_local = self.get_latest_local_timestamp(table_name)
     
     if new_data['timestamp'] > latest_local:
-        # より新しいデータなら取得して同期
-        self.fetch_and_sync_from(table_name, new_data['timestamp'])
-        self.logger.info(f"[Realtime] {table_name}: 新規データ検出・同期完了")
+        # より新しいデータなら差分を取得
+        gap_data = self.fetch_gap_data(table_name, latest_local, new_data['timestamp'])
+        
+        # ローカルDBに保存
+        self.save_to_local_db(table_name, gap_data)
+        
+        self.logger.info(f"[Realtime] {table_name}: {len(gap_data)}件の新規データを同期")
 
-def fetch_initial_data(self):
-    """起動時に各時間足テーブルからデータを取得"""
-    tables = [
-        ('order_book_shared', '5分足'),
-        ('order_book_15min', '15分足'),
-        ('order_book_30min', '30分足'),
-        ('order_book_1hour', '1時間足'),
-        ('order_book_2hour', '2時間足'),
-        ('order_book_4hour', '4時間足'),
-        ('order_book_daily', '日足')
-    ]
+def fetch_gap_data(self, table_name, start_timestamp, end_timestamp):
+    """指定期間のギャップデータを取得"""
+    result = self.supabase.table(table_name)\
+        .select('*')\
+        .eq('group_id', self.group_id)\
+        .gt('timestamp', start_timestamp)\
+        .lte('timestamp', end_timestamp)\
+        .order('timestamp')\
+        .execute()
     
-    for table_name, timeframe_name in tables:
-        try:
-            # 各1000件取得
-            result = self.supabase.table(table_name)\
-                .select('*')\
-                .eq('group_id', self.group_id)\
-                .order('timestamp', desc=True)\
-                .limit(1000)\
-                .execute()
-            
-            if result.data:
-                # ローカルDBに保存（重複チェックあり）
-                self.save_to_local_batch(result.data, table_name)
-                self.logger.info(f"{timeframe_name}: {len(result.data)}件取得")
-        except Exception as e:
-            self.logger.error(f"{timeframe_name}取得エラー: {e}")
+    return result.data if result.data else []
 ```
 
 ---
@@ -709,10 +770,11 @@ def fetch_initial_data(self):
 | 段階 | 難易度 | 作業時間 | 期待効果 | 状態 |
 |------|--------|---------|----------|------|
 | 第1段階 | ★☆☆ | 2-3時間 | 1時間足の高速化（12倍） | ✅ 完了 |
-| 第2段階 | ★★☆ | 4-5時間 | 全時間足の書き込みと読み込み | ✅ 完了 |
+| 第2段階 | ★★☆ | 4-5時間 | 全時間足への書き込み | ✅ 完了 |
 | 第3段階 | ★★★ | 6-8時間 | 過去データの活用 | ✅ 完了 |
 | 第4段階 | ★★☆ | 3-4時間 | 安定性向上 | ✅ 完了 |
-| 第5段階 | ★★☆ | 3-4時間 | Realtime同期 | ⛳ 未実装 |
+| 第5段階 | ★☆☆ | 2-3時間 | 専用テーブルからの読み込み | ⛳ 未実装 |
+| 第6段階 | ★★☆ | 3-4時間 | Realtime同期 | ⛳ 未実装 |
 
 ## 🚀 推奨実装アプローチ
 
@@ -754,14 +816,18 @@ def fetch_initial_data(self):
 - **1分足**: ローカルのみで管理（リアルタイムスクレイピング）✅
 - **5分足以上の書き込み**: Supabaseへの書き込み実装済み ✅
 - **全時間足の最大値比較**: 実装済み ✅
-- **専用テーブルからの読み込み**: 実装済み（fetch_initial_dataメソッド）✅
+- **専用テーブルからの読み込み**: メソッドは作成済み、呼び出し未実装 ⚠️
 - **リアルタイム欠損補完**: 現在は1分データで補完（問題あり）⚠️
 
 ### 推奨される実装（第5段階）
+- **起動時処理**: fetch_initial_dataメソッドの呼び出し
+- **ローカルDB保存**: 取得データをSQLiteに格納
+- **欠損補完削除**: 異なる粒度のデータ混在を防ぐ
+
+### 推奨される実装（第6段階）
 - **Supabase Realtime**: 各時間足の最新タイムスタンプを監視
-- **起動時**: 各時間足テーブルから1000件ずつ取得
 - **同期方式**: 他ユーザーの更新をリアルタイムで受信・同期
-- **欠損補完**: 削除（異なる粒度のデータ混在を防ぐ）
+- **競合解決**: レースコンディションの解決
 
 ## 📚 関連ドキュメント
 
