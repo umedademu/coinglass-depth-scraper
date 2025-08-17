@@ -1557,81 +1557,144 @@ class ScraperGUI:
             self.ask_history = [x[1] for x in sorted_data]
             self.bid_history = [x[2] for x in sorted_data]
     
+    def generate_timeframe_data_from_memory(self, interval):
+        """メモリ上のデータから時間足データを動的生成（1分足・3分足用）"""
+        filtered_times = []
+        filtered_asks = []
+        filtered_bids = []
+        
+        # グループ化のための辞書（キー：時間帯、値：その時間帯のデータリスト）
+        time_groups = {}
+        
+        for i in range(len(self.time_history)):
+            time_obj = self.time_history[i]
+            
+            # 時間帯を決定（分単位の間隔に基づく）
+            if interval < 60:  # 分足の場合
+                # 指定分単位で切り捨て
+                group_minute = (time_obj.minute // interval) * interval
+                group_key = time_obj.replace(minute=group_minute, second=0, microsecond=0)
+            elif interval == 60:  # 1時間足の場合
+                group_key = time_obj.replace(minute=0, second=0, microsecond=0)
+            elif interval < 1440:  # 時間足の場合（2時間、4時間）
+                hours_interval = interval // 60
+                group_hour = (time_obj.hour // hours_interval) * hours_interval
+                group_key = time_obj.replace(hour=group_hour, minute=0, second=0, microsecond=0)
+            else:  # 日足の場合
+                group_key = time_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # グループにデータを追加
+            if group_key not in time_groups:
+                time_groups[group_key] = []
+            time_groups[group_key].append((time_obj, self.ask_history[i], self.bid_history[i]))
+        
+        # 各グループから最後（最新）のデータを選択
+        sorted_groups = sorted(time_groups.keys())
+        for group_key in sorted_groups:
+            # グループ内のデータを時刻でソート
+            group_data = sorted(time_groups[group_key], key=lambda x: x[0])
+            # 最後のデータを採用（終値）
+            last_data = group_data[-1]
+            filtered_times.append(last_data[0])
+            filtered_asks.append(last_data[1])
+            filtered_bids.append(last_data[2])
+        
+        # 最大300点に制限
+        if len(filtered_times) > 300:
+            filtered_times = filtered_times[-300:]
+            filtered_asks = filtered_asks[-300:]
+            filtered_bids = filtered_bids[-300:]
+        
+        return filtered_times, filtered_asks, filtered_bids
+    
+    def load_timeframe_data_from_db(self, table_name, limit=300):
+        """時間足専用テーブルからデータを読み込む"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(f"""
+                SELECT timestamp, ask_total, bid_total
+                FROM {table_name}
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            
+            rows = cursor.fetchall()
+            if not rows:
+                return [], [], []
+            
+            # 古い順に並び替え
+            rows.reverse()
+            
+            times = []
+            asks = []
+            bids = []
+            
+            for row in rows:
+                timestamp_str, ask_total, bid_total = row
+                timestamp = datetime.fromisoformat(timestamp_str)
+                times.append(timestamp)
+                asks.append(ask_total)
+                bids.append(bid_total)
+            
+            return times, asks, bids
+            
+        except Exception as e:
+            self.add_log(f"[{table_name}] データ読み込みエラー: {str(e)}", "ERROR")
+            return [], [], []
+    
     def update_graph(self):
         """グラフを更新"""
-        if len(self.time_history) < 2:
-            return  # データが少なすぎる場合は更新しない
+        # 時間足の設定取得
+        timeframe = self.timeframe_var.get()
+        timeframe_intervals = {
+            "1分": 1,
+            "3分": 3,
+            "5分": 5,
+            "15分": 15,
+            "30分": 30,
+            "1時間": 60,
+            "2時間": 120,
+            "4時間": 240,
+            "1日": 1440
+        }
+        interval = timeframe_intervals[timeframe]
+        
+        # 時間足とテーブル名のマッピング
+        timeframe_tables = {
+            "5分": "order_book_5min",
+            "15分": "order_book_15min",
+            "30分": "order_book_30min",
+            "1時間": "order_book_1hour",
+            "2時間": "order_book_2hour",
+            "4時間": "order_book_4hour",
+            "1日": "order_book_daily"
+        }
         
         try:
-            # 時間足に応じたサンプリング間隔を設定
-            timeframe = self.timeframe_var.get()
-            timeframe_intervals = {
-                "1分": 1,
-                "3分": 3,
-                "5分": 5,
-                "15分": 15,
-                "30分": 30,
-                "1時間": 60,
-                "2時間": 120,
-                "4時間": 240,
-                "1日": 1440
-            }
-            interval = timeframe_intervals[timeframe]
-            
-            # 時刻ベースでデータをグループ化
-            filtered_times = []
-            filtered_asks = []
-            filtered_bids = []
-            
-            # グループ化のための辞書（キー：時間帯、値：その時間帯のデータリスト）
-            time_groups = {}
-            
-            for i in range(len(self.time_history)):
-                time_obj = self.time_history[i]
+            # 5分足以上は専用テーブルから読み込み
+            if timeframe in timeframe_tables:
+                table_name = timeframe_tables[timeframe]
+                times, asks, bids = self.load_timeframe_data_from_db(table_name)
                 
-                # 時間帯を決定（分単位の間隔に基づく）
-                if interval < 60:  # 分足の場合
-                    # 指定分単位で切り捨て
-                    group_minute = (time_obj.minute // interval) * interval
-                    group_key = time_obj.replace(minute=group_minute, second=0, microsecond=0)
-                elif interval == 60:  # 1時間足の場合
-                    group_key = time_obj.replace(minute=0, second=0, microsecond=0)
-                elif interval < 1440:  # 時間足の場合（2時間、4時間）
-                    hours_interval = interval // 60
-                    group_hour = (time_obj.hour // hours_interval) * hours_interval
-                    group_key = time_obj.replace(hour=group_hour, minute=0, second=0, microsecond=0)
-                else:  # 日足の場合
-                    group_key = time_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-                
-                # グループにデータを追加
-                if group_key not in time_groups:
-                    time_groups[group_key] = []
-                time_groups[group_key].append((time_obj, self.ask_history[i], self.bid_history[i]))
+                if not times:
+                    # データがない場合は従来の動的生成にフォールバック
+                    self.add_log(f"[{timeframe}] 専用テーブルにデータがありません。動的生成にフォールバックします。")
+                    # 従来の処理にフォールバック
+                    if len(self.time_history) < 2:
+                        return
+                    times, asks, bids = self.generate_timeframe_data_from_memory(interval)
+                else:
+                    self.add_log(f"[{timeframe}] {table_name}から{len(times)}件のデータを読み込みました")
             
-            # 各グループから最後（最新）のデータを選択
-            sorted_groups = sorted(time_groups.keys())
-            for group_key in sorted_groups:
-                # グループ内のデータを時刻でソート
-                group_data = sorted(time_groups[group_key], key=lambda x: x[0])
-                # 最後のデータを採用（終値）
-                last_data = group_data[-1]
-                filtered_times.append(last_data[0])
-                filtered_asks.append(last_data[1])
-                filtered_bids.append(last_data[2])
-            
-            # 最大300点に制限
-            if len(filtered_times) > 300:
-                filtered_times = filtered_times[-300:]
-                filtered_asks = filtered_asks[-300:]
-                filtered_bids = filtered_bids[-300:]
+            # 1分足・3分足は従来通りメモリから動的生成
+            else:
+                if len(self.time_history) < 2:
+                    return
+                times, asks, bids = self.generate_timeframe_data_from_memory(interval)
             
             # フィルタリング後にデータが空の場合は処理をスキップ
-            if len(filtered_times) < 2:
+            if len(times) < 2:
                 return
-            
-            times = filtered_times
-            asks = filtered_asks
-            bids = filtered_bids
             
             # 各グラフのY軸範囲を計算
             ask_min = 0
@@ -1682,7 +1745,7 @@ class ScraperGUI:
             for ax in [self.ax_ask, self.ax_bid]:
                 # データ点数から間引き間隔を計算（最大30ラベル）
                 max_labels = 30
-                data_count = len(filtered_times)
+                data_count = len(times)
                 skip_interval = max(1, data_count // max_labels)
                 
                 # 表示するティックの位置とラベルを準備
@@ -1691,8 +1754,8 @@ class ScraperGUI:
                 
                 for i in range(0, data_count, skip_interval):
                     if i < data_count:
-                        tick_positions.append(filtered_times[i])
-                        time_obj = filtered_times[i]
+                        tick_positions.append(times[i])
+                        time_obj = times[i]
                         
                         # 日足の場合はすべて月/日表示
                         if timeframe == "1日":

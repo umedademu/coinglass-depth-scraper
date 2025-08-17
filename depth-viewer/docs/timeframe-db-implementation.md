@@ -162,8 +162,10 @@ Realtimeで受信したUPDATEイベントを適切な時間足テーブルに保
 #### 実装内容
 ```python
 # テーブル名マッピング
+# 注: 5分足のSupabaseテーブル名'order_book_shared'は
+#     将来的に'order_book_5min'に統一される予定
 table_mapping = {
-    'order_book_shared': 'order_book_5min',
+    'order_book_shared': 'order_book_5min',  # 将来的に'order_book_5min'に変更予定
     'order_book_15min': 'order_book_15min',
     'order_book_30min': 'order_book_30min',
     # ... 以下同様
@@ -190,7 +192,7 @@ Realtime同期が正しく動作すればOKです！」
 
 ---
 
-### 第5段階：グラフ表示の切り替え 🎯難易度: 20/100
+### 第5段階：グラフ表示の切り替え ✅完了 🎯難易度: 20/100
 
 #### 目標
 時間足選択に応じて、適切なテーブルからデータを読み込んでグラフを表示する。
@@ -200,18 +202,48 @@ Realtime同期が正しく動作すればOKです！」
 - 5分足以上は専用テーブルから読み込み
 - 1分足・3分足は従来通り（`order_book_history`から動的生成）
 - データ読み込みクエリの最適化
+- **重要: 変数名の統一（filtered_times → times）**
+
+#### ⚠️ 実装上の重要な注意事項
+```
+警告: 変数名の統一が必要です！
+- 従来のコードでは filtered_times, filtered_asks, filtered_bids を使用
+- 新実装では times, asks, bids に統一する
+- グラフ描画処理の全箇所で変数名を確認・修正する必要があります
+  - データ取得部分: times, asks, bids
+  - グラフ描画部分: times, asks, bids
+  - X軸ラベル設定: len(times), times[i] ← ここが見落としやすい！
+```
 
 #### 実装内容
 ```python
-if timeframe == "5分":
-    # order_book_5minから直接読み込み
-    data = cursor.execute(
-        "SELECT * FROM order_book_5min ORDER BY timestamp DESC LIMIT 300"
-    )
-elif timeframe in ["1分", "3分"]:
-    # 従来通りorder_book_historyから動的生成
-else:
-    # 各時間足テーブルから読み込み
+# 新しいメソッド1: 動的生成処理を分離
+def generate_timeframe_data_from_memory(self, interval):
+    """1分足・3分足用の動的生成（従来処理を別メソッド化）"""
+    filtered_times = []  # この内部では filtered_* を使用
+    # ... 処理 ...
+    return filtered_times, filtered_asks, filtered_bids  # 戻り値
+
+# 新しいメソッド2: DBからの直接読み込み
+def load_timeframe_data_from_db(self, table_name, limit=300):
+    """5分足以上の専用テーブルから読み込み"""
+    # ... 処理 ...
+    return times, asks, bids  # 直接 times として返す
+
+# 修正されたupdate_graphメソッド
+def update_graph(self):
+    if timeframe in timeframe_tables:  # 5分足以上
+        times, asks, bids = self.load_timeframe_data_from_db(table_name)
+    else:  # 1分足・3分足
+        times, asks, bids = self.generate_timeframe_data_from_memory(interval)
+    
+    # ⚠️ 以降、全てtimes/asks/bidsで統一（filtered_*は使わない）
+    # グラフ描画処理...
+    self.ax_ask.plot(times, asks, ...)  # OK
+    
+    # X軸ラベル設定（ここが重要！）
+    data_count = len(times)  # len(filtered_times)ではない！
+    tick_positions.append(times[i])  # filtered_times[i]ではない！
 ```
 
 #### 確認項目
