@@ -165,8 +165,8 @@ class RealtimeSync:
                 new_data = payload.get('data', {}).get('record', {})
                 
                 if new_data and self.update_callback:
-                    # メインスレッドのコールバックを呼び出す
-                    self.update_callback(table_name, timeframe_name, new_data)
+                    # メインスレッドのコールバックを呼び出す（event_typeも渡す）
+                    self.update_callback(table_name, timeframe_name, new_data, event_type)
                     
                     msg = f"[Realtime] {timeframe_name}の更新を検出"
                     self.logger.info(msg)  # debugからinfoに変更して確実に表示

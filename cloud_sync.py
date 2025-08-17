@@ -751,10 +751,11 @@ class CloudSyncManager:
             )
             
             # 更新コールバックを設定
-            def realtime_update_handler(table_name, timeframe_name, new_data):
+            def realtime_update_handler(table_name, timeframe_name, new_data, event_type='UPDATE'):
                 # 既存のhandle_realtime_updateを呼び出す
+                # Realtimeからの更新は基本的にUPDATEとして処理
                 payload = {
-                    'event_type': 'INSERT',
+                    'event_type': event_type,
                     'new': new_data
                 }
                 self.handle_realtime_update(table_name, timeframe_name, payload)
@@ -797,7 +798,22 @@ class CloudSyncManager:
                 if not new_timestamp:
                     return
                 
-                # 最新タイムスタンプを確認
+                # UPDATEイベントの場合は直接ローカルDBに保存（タイムスタンプチェック不要）
+                if event_type == 'UPDATE':
+                    # 単一レコードをリストとして渡す
+                    if self.local_db_callback:
+                        self.local_db_callback(table_name, [new_data])
+                        
+                        # 統計情報を更新
+                        self.stats['realtime_updates'] += 1
+                        
+                        msg = f"[Realtime] {timeframe_name}: UPDATEイベントを処理 (timestamp: {new_timestamp}, ask: {new_data.get('ask_total')}, bid: {new_data.get('bid_total')})"
+                        self.logger.info(msg)
+                        if self.log_callback:
+                            self.log_callback(msg, "INFO")
+                    return
+                
+                # INSERTの場合は従来通りタイムスタンプチェック
                 if table_name not in self.latest_timestamps:
                     self.latest_timestamps[table_name] = self._get_latest_local_timestamp(table_name)
                 
