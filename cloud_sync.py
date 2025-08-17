@@ -15,6 +15,14 @@ except ImportError:
     Client = None
     create_client = None
 
+# Realtime同期用の非同期実装をインポート
+try:
+    from realtime_sync import RealtimeSync
+    REALTIME_AVAILABLE = True
+except ImportError:
+    REALTIME_AVAILABLE = False
+    RealtimeSync = None
+
 # リトライデコレータ
 def retry_on_failure(max_retries: int = 3, delay: int = 5):
     """失敗時に自動リトライするデコレータ"""
@@ -93,7 +101,7 @@ class CloudSyncManager:
         }
         
         # Realtime関連の初期化
-        self.realtime_channels = {}  # チャンネルを格納する辞書
+        self.realtime_sync: Optional[RealtimeSync] = None  # 非同期版Realtime同期
         self.latest_timestamps = {}  # 各テーブルの最新タイムスタンプ
         self.realtime_enabled = self.config.get("cloud_sync", {}).get("realtime_enabled", True)
         
@@ -726,51 +734,45 @@ class CloudSyncManager:
         # ローカルDB保存用コールバックを設定
         if local_db_callback:
             self.local_db_callback = local_db_callback
-            
-        tables = [
-            ('order_book_shared', '5分足'),
-            ('order_book_15min', '15分足'),
-            ('order_book_30min', '30分足'),
-            ('order_book_1hour', '1時間足'),
-            ('order_book_2hour', '2時間足'),
-            ('order_book_4hour', '4時間足'),
-            ('order_book_daily', '日足')
-        ]
         
+        # 非同期版Realtimeクラスが利用可能か確認
+        if not REALTIME_AVAILABLE:
+            msg = "[Realtime] 非同期版Realtimeモジュールが利用できません"
+            self.logger.warning(msg)
+            if self.log_callback:
+                self.log_callback(msg, "WARNING")
+            return False
+            
         try:
-            for table_name, timeframe_name in tables:
-                # チャンネル名を作成
-                channel_name = f'sync-{table_name}-{self.group_id}'
-                
-                # Realtime購読を設定
-                channel = self.client.channel(channel_name)
-                
-                # INSERT/UPDATEイベントを監視
-                def create_handler(tn, tfn):
-                    def handler(payload):
-                        self.handle_realtime_update(tn, tfn, payload)
-                    return handler
-                
-                channel.on(
-                    'postgres_changes',
-                    {
-                        'event': '*',  # INSERT, UPDATE, DELETEすべてを監視
-                        'schema': 'public',
-                        'table': table_name,
-                        'filter': f'group_id=eq.{self.group_id}'
-                    },
-                    create_handler(table_name, timeframe_name)
-                ).subscribe()
-                
-                self.realtime_channels[table_name] = channel
-                
-                msg = f"[Realtime] {timeframe_name}の監視を開始しました"
+            # Realtime同期インスタンスを作成
+            self.realtime_sync = RealtimeSync(
+                config=self.config,
+                log_callback=self.log_callback
+            )
+            
+            # 更新コールバックを設定
+            def realtime_update_handler(table_name, timeframe_name, new_data):
+                # 既存のhandle_realtime_updateを呼び出す
+                payload = {
+                    'event_type': 'INSERT',
+                    'new': new_data
+                }
+                self.handle_realtime_update(table_name, timeframe_name, payload)
+            
+            # Realtime同期を開始
+            if self.realtime_sync.start(update_callback=realtime_update_handler):
+                msg = "[Realtime] 非同期版Realtime同期を開始しました"
                 self.logger.info(msg)
                 if self.log_callback:
                     self.log_callback(msg, "INFO")
-            
-            return True
-            
+                return True
+            else:
+                msg = "[Realtime] Realtime同期の開始に失敗しました"
+                self.logger.warning(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "WARNING")
+                return False
+                
         except Exception as e:
             msg = f"[Realtime] セットアップエラー: {e}"
             self.logger.error(msg)
@@ -931,18 +933,14 @@ class CloudSyncManager:
     def cleanup_realtime(self):
         """Realtime接続のクリーンアップ"""
         try:
-            for table_name, channel in self.realtime_channels.items():
-                try:
-                    channel.unsubscribe()
-                    msg = f"[Realtime] {table_name}の監視を停止しました"
-                    self.logger.info(msg)
-                    if self.log_callback:
-                        self.log_callback(msg, "INFO")
-                except Exception as e:
-                    msg = f"[Realtime] {table_name}のクリーンアップエラー: {e}"
-                    self.logger.warning(msg)
-            
-            self.realtime_channels.clear()
+            # 非同期版Realtime同期を停止
+            if self.realtime_sync:
+                self.realtime_sync.stop()
+                self.realtime_sync = None
+                msg = "[Realtime] 非同期版Realtime同期を停止しました"
+                self.logger.info(msg)
+                if self.log_callback:
+                    self.log_callback(msg, "INFO")
             
         except Exception as e:
             msg = f"[Realtime] クリーンアップエラー: {e}"

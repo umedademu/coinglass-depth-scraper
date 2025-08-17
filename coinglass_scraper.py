@@ -1105,99 +1105,34 @@ class ScraperGUI:
                 self.add_log("時間足データの取得に失敗しました", "WARNING")
                 return
             
-            cursor = self.conn.cursor()
-            total_inserted = 0
+            # 重要な修正：1分足DB（order_book_history）には1分足データのみを保存すべき
+            # 5分足以上のデータはSupabaseから取得するが、ローカルDBには保存しない
+            # これにより、1分足と他の時間足データの混在を防ぐ
             
-            # 各時間足のデータをローカルDBに保存
+            # 各時間足のデータ件数をログに記録（保存はしない）
             for table_name, records in all_timeframe_data.items():
                 if not records:
                     continue
                     
-                table_inserted = 0
-                for record in records:
-                    try:
-                        # タイムスタンプからタイムゾーン情報を除去
-                        timestamp_str = record['timestamp']
-                        if '+' in timestamp_str or 'T' in timestamp_str:
-                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                            timestamp_str = dt.replace(tzinfo=None).isoformat()
-                        
-                        # 既存データをチェック
-                        cursor.execute("""
-                            SELECT ask_total, bid_total FROM order_book_history
-                            WHERE timestamp = ?
-                        """, (timestamp_str,))
-                        
-                        existing = cursor.fetchone()
-                        
-                        if existing:
-                            # 最大値を選択して更新
-                            if record['ask_total'] > existing[0] or record['bid_total'] > existing[1]:
-                                cursor.execute("""
-                                    UPDATE order_book_history 
-                                    SET ask_total = ?, bid_total = ?, price = ?
-                                    WHERE timestamp = ?
-                                """, (
-                                    max(record['ask_total'], existing[0]),
-                                    max(record['bid_total'], existing[1]),
-                                    record['price'],
-                                    timestamp_str
-                                ))
-                                if cursor.rowcount > 0:
-                                    table_inserted += 1
-                        else:
-                            # 新規挿入
-                            cursor.execute("""
-                                INSERT INTO order_book_history 
-                                (timestamp, ask_total, bid_total, price)
-                                VALUES (?, ?, ?, ?)
-                            """, (
-                                timestamp_str,
-                                record['ask_total'],
-                                record['bid_total'],
-                                record['price']
-                            ))
-                            if cursor.rowcount > 0:
-                                table_inserted += 1
-                                
-                                # メモリ上の履歴にも追加（5分足以上のデータは追加しない）
-                                # 第6段階修正：1分足グラフ用配列への混入を防ぐためコメントアウト
-                                # timestamp = datetime.fromisoformat(timestamp_str)
-                                # self.time_history.append(timestamp)
-                                # self.ask_history.append(record['ask_total'])
-                                # self.bid_history.append(record['bid_total'])
-                                
-                    except Exception as e:
-                        # 個別のレコードエラーは継続
-                        continue
+                timeframe_names = {
+                    'order_book_shared': '5分足',
+                    'order_book_15min': '15分足',
+                    'order_book_30min': '30分足',
+                    'order_book_1hour': '1時間足',
+                    'order_book_2hour': '2時間足',
+                    'order_book_4hour': '4時間足',
+                    'order_book_daily': '日足'
+                }
                 
-                if table_inserted > 0:
-                    # テーブル名から時間足名を取得
-                    timeframe_names = {
-                        'order_book_shared': '5分足',
-                        'order_book_15min': '15分足',
-                        'order_book_30min': '30分足',
-                        'order_book_1hour': '1時間足',
-                        'order_book_2hour': '2時間足',
-                        'order_book_4hour': '4時間足',
-                        'order_book_daily': '日足'
-                    }
-                    timeframe_name = timeframe_names.get(table_name, table_name)
-                    self.add_log(f"{timeframe_name}: {table_inserted}件のデータをローカルDBに保存")
-                    total_inserted += table_inserted
+                timeframe_name = timeframe_names.get(table_name, table_name)
+                self.add_log(f"{timeframe_name}: {len(records)}件のデータを取得（ローカルDBには保存しません）")
             
-            if total_inserted > 0:
-                self.conn.commit()
-                self.add_log(f"合計{total_inserted}件の時間足データをローカルDBに保存しました")
-                
-                # 時系列順にソート
-                self.sort_history_data()
-                
-                # UIを更新
-                self.update_timeframe_options()
-                self.update_graph()
-            else:
-                self.add_log("新しい時間足データはありませんでした")
+            # 修正：5分足以上のデータは1分足DBに保存しない
+            # 理由：1時間足、日足などの大きな値が1分足DBに混入し、グラフがギザギザになる
+            # これらのデータは必要に応じてSupabaseから直接取得する
+            
+            self.conn.commit()
+            self.add_log("時間足データの取得完了（1分足DBへの保存はスキップ）")
                 
         except Exception as e:
             self.add_log(f"時間足データ取得エラー: {str(e)}", "ERROR")
@@ -1272,6 +1207,12 @@ class ScraperGUI:
         """Realtime同期で取得したデータをローカルDBに保存"""
         try:
             if not records:
+                return
+            
+            # 重要な修正：1分足DB（order_book_history）には1分足データのみを保存
+            # 5分足以上のデータは保存しない（グラフのギザギザを防ぐ）
+            if table_name != 'order_book_1min':  # 1分足以外は保存しない
+                self.add_log(f"[Realtime同期] {table_name}のデータは1分足DBには保存しません", "DEBUG")
                 return
             
             cursor = self.conn.cursor()
