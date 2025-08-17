@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase, OrderBookData } from '../lib/supabase'
 import dynamic from 'next/dynamic'
+import { RealtimeChannel } from '@supabase/supabase-js'
 
 // Chart.jsはSSRと互換性がないため、動的インポートを使用
 const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
@@ -12,6 +13,9 @@ const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
 
 // タイムフレームの定義
 type Timeframe = '5min' | '15min' | '30min' | '1hour' | '2hour' | '4hour' | 'daily'
+
+// 接続状態の定義
+type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error'
 
 interface TimeframeConfig {
   label: string
@@ -36,6 +40,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('5min')
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false)
+  const channelRef = useRef<RealtimeChannel | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectAttemptsRef = useRef(0)
 
   // 初回マウント時にlocalStorageから設定を復元
   useEffect(() => {
@@ -44,6 +53,103 @@ export default function Home() {
       setSelectedTimeframe(saved as Timeframe)
     }
   }, [])
+
+  // 新規データをリストに追加する関数（メモリリーク対策付き）
+  const handleNewData = (newRecord: OrderBookData) => {
+    console.log(`[Realtime] New data received for ${selectedTimeframe}:`, newRecord)
+    
+    // データ更新通知を表示
+    setShowUpdateNotification(true)
+    setTimeout(() => setShowUpdateNotification(false), 3000)
+    
+    // データを更新（最新データを先頭に追加）
+    setData(prevData => {
+      const updated = [newRecord, ...prevData]
+      // メモリリーク対策：100件を超えたら古いデータを削除
+      return updated.slice(0, 100)
+    })
+    
+    // グラフデータを更新
+    setChartData(prevChartData => {
+      const updated = [newRecord, ...prevChartData]
+      // メモリリーク対策：300件を超えたら古いデータを削除
+      return updated.slice(0, 300)
+    })
+    
+    setLastUpdate(new Date())
+  }
+
+  // 再接続処理
+  const setupRealtimeConnection = () => {
+    // 既存のチャンネルをクリーンアップ
+    if (channelRef.current) {
+      console.log('[Realtime] Cleaning up previous channel')
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+
+    const config = timeframeConfigs[selectedTimeframe]
+    const channelName = `realtime-${config.table}-default-group`
+    
+    console.log(`[Realtime] Setting up subscription for ${config.label}`)
+    setConnectionStatus('connecting')
+    
+    // 新しいチャンネルを作成
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: config.table,
+          filter: 'group_id=eq.default-group'
+        },
+        (payload) => {
+          handleNewData(payload.new as OrderBookData)
+          // 接続成功時は再接続カウンターをリセット
+          reconnectAttemptsRef.current = 0
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[Realtime] Subscription status: ${status}`)
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected')
+          reconnectAttemptsRef.current = 0
+          console.log(`[Realtime] Successfully subscribed to ${config.label}`)
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setConnectionStatus('error')
+          console.error(`[Realtime] Connection error: ${status}`)
+          
+          // 自動再接続を試みる
+          scheduleReconnect()
+        } else if (status === 'CLOSED') {
+          setConnectionStatus('disconnected')
+          console.log('[Realtime] Channel closed')
+        }
+      })
+
+    channelRef.current = channel
+  }
+
+  // 再接続をスケジュール
+  const scheduleReconnect = () => {
+    // 既存の再接続タイマーをクリア
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+    }
+
+    // 再接続の試行回数に応じて待機時間を増やす（指数バックオフ）
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000)
+    reconnectAttemptsRef.current++
+    
+    console.log(`[Realtime] Scheduling reconnect in ${delay}ms (attempt ${reconnectAttemptsRef.current})`)
+    
+    reconnectTimeoutRef.current = setTimeout(() => {
+      console.log('[Realtime] Attempting to reconnect...')
+      setupRealtimeConnection()
+    }, delay)
+  }
 
   // タイムフレーム変更時にデータを再取得
   useEffect(() => {
@@ -88,6 +194,52 @@ export default function Home() {
     fetchData()
     localStorage.setItem('selectedTimeframe', selectedTimeframe)
   }, [selectedTimeframe])
+
+  // Realtime購読の設定
+  useEffect(() => {
+    setupRealtimeConnection()
+
+    // クリーンアップ関数
+    return () => {
+      // 再接続タイマーをクリア
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+      
+      // チャンネルをクリーンアップ
+      if (channelRef.current) {
+        console.log('[Realtime] Cleaning up channel on unmount')
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+        setConnectionStatus('disconnected')
+      }
+    }
+  }, [selectedTimeframe]) // selectedTimeframeが変更されたら再購読
+
+  // ネットワーク接続の監視
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('[Network] Connection restored')
+      if (connectionStatus === 'error' || connectionStatus === 'disconnected') {
+        console.log('[Network] Attempting to reconnect...')
+        setupRealtimeConnection()
+      }
+    }
+
+    const handleOffline = () => {
+      console.log('[Network] Connection lost')
+      setConnectionStatus('disconnected')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [connectionStatus])
 
   // 最新のデータ（最初の1件）
   const latestData = data[0]
@@ -138,9 +290,77 @@ export default function Home() {
       padding: '2rem'
     }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '2rem', marginBottom: '2rem', textAlign: 'center' }}>
-          Depth Viewer v0.800
-        </h1>
+        <div style={{ position: 'relative', marginBottom: '2rem' }}>
+          <h1 style={{ fontSize: '2rem', textAlign: 'center' }}>
+            Depth Viewer v0.800
+          </h1>
+          
+          {/* 接続状態インジケーター */}
+          <div style={{
+            position: 'absolute',
+            top: '0.5rem',
+            right: '0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.5rem 1rem',
+            backgroundColor: '#2a2a2a',
+            borderRadius: '6px',
+            fontSize: '0.875rem'
+          }}>
+            <div style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              backgroundColor: connectionStatus === 'connected' ? '#4ade80' : 
+                             connectionStatus === 'connecting' ? '#fbbf24' :
+                             connectionStatus === 'error' ? '#f87171' : '#666',
+              animation: connectionStatus === 'connecting' ? 'pulse 1.5s infinite' : 'none'
+            }} />
+            <span style={{ color: '#888' }}>
+              {connectionStatus === 'connected' ? '接続中' :
+               connectionStatus === 'connecting' ? '接続中...' :
+               connectionStatus === 'error' ? 'エラー' : '切断'}
+            </span>
+          </div>
+
+          {/* データ更新通知 */}
+          {showUpdateNotification && (
+            <div style={{
+              position: 'absolute',
+              top: '3rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              backgroundColor: '#3b82f6',
+              color: '#fff',
+              padding: '0.5rem 1rem',
+              borderRadius: '6px',
+              fontSize: '0.875rem',
+              animation: 'slideDown 0.3s ease-out',
+              zIndex: 10
+            }}>
+              データが更新されました
+            </div>
+          )}
+        </div>
+
+        {/* CSS アニメーション */}
+        <style jsx>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+          @keyframes slideDown {
+            from {
+              opacity: 0;
+              transform: translateX(-50%) translateY(-10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(-50%) translateY(0);
+            }
+          }
+        `}</style>
         
         {loading ? (
           <div style={{ textAlign: 'center', padding: '3rem' }}>

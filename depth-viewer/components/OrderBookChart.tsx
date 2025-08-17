@@ -108,6 +108,14 @@ export default function OrderBookChart({ data }: OrderBookChartProps) {
   const askChartOptions: ChartOptions<'line'> = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: {
+      duration: 500,
+      easing: 'easeInOutQuart'
+    },
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
     plugins: {
       legend: {
         display: false
@@ -173,6 +181,14 @@ export default function OrderBookChart({ data }: OrderBookChartProps) {
   const bidChartOptions: ChartOptions<'line'> = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: {
+      duration: 500,
+      easing: 'easeInOutQuart'
+    },
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
     plugins: {
       legend: {
         display: false
