@@ -1222,34 +1222,93 @@ class ScraperGUI:
                 self.add_log("時間足データの取得に失敗しました", "WARNING")
                 return
             
-            # 重要な修正：1分足DB（order_book_history）には1分足データのみを保存すべき
-            # 5分足以上のデータはSupabaseから取得するが、ローカルDBには保存しない
-            # これにより、1分足と他の時間足データの混在を防ぐ
+            # 第3段階：Supabaseデータとの比較・更新
+            # 各時間足データを対応するローカルテーブルに保存
             
-            # 各時間足のデータ件数をログに記録（保存はしない）
-            for table_name, records in all_timeframe_data.items():
+            # Supabaseテーブル名とローカルテーブル名のマッピング
+            table_mapping = {
+                'order_book_shared': 'order_book_5min',
+                'order_book_15min': 'order_book_15min',
+                'order_book_30min': 'order_book_30min',
+                'order_book_1hour': 'order_book_1hour',
+                'order_book_2hour': 'order_book_2hour',
+                'order_book_4hour': 'order_book_4hour',
+                'order_book_daily': 'order_book_daily'
+            }
+            
+            timeframe_names = {
+                'order_book_shared': '5分足',
+                'order_book_15min': '15分足',
+                'order_book_30min': '30分足',
+                'order_book_1hour': '1時間足',
+                'order_book_2hour': '2時間足',
+                'order_book_4hour': '4時間足',
+                'order_book_daily': '日足'
+            }
+            
+            cursor = self.conn.cursor()
+            
+            # 各時間足のデータを処理
+            for supabase_table, records in all_timeframe_data.items():
                 if not records:
                     continue
-                    
-                timeframe_names = {
-                    'order_book_shared': '5分足',
-                    'order_book_15min': '15分足',
-                    'order_book_30min': '30分足',
-                    'order_book_1hour': '1時間足',
-                    'order_book_2hour': '2時間足',
-                    'order_book_4hour': '4時間足',
-                    'order_book_daily': '日足'
-                }
                 
-                timeframe_name = timeframe_names.get(table_name, table_name)
-                self.add_log(f"{timeframe_name}: {len(records)}件のデータを取得（ローカルDBには保存しません）")
-            
-            # 修正：5分足以上のデータは1分足DBに保存しない
-            # 理由：1時間足、日足などの大きな値が1分足DBに混入し、グラフがギザギザになる
-            # これらのデータは必要に応じてSupabaseから直接取得する
+                local_table = table_mapping.get(supabase_table)
+                if not local_table:
+                    continue
+                
+                timeframe_name = timeframe_names.get(supabase_table, supabase_table)
+                self.add_log(f"[初期データ取得] {timeframe_name}: {len(records)}件取得")
+                
+                new_count = 0
+                update_count = 0
+                
+                for record in records:
+                    try:
+                        # タイムスタンプからタイムゾーン情報を除去
+                        timestamp_str = record['timestamp']
+                        if '+' in timestamp_str or 'T' in timestamp_str:
+                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            timestamp_str = dt.replace(tzinfo=None).isoformat()
+                        
+                        # 既存データをチェック
+                        cursor.execute(f"""
+                            SELECT ask_total, bid_total FROM {local_table}
+                            WHERE timestamp = ?
+                        """, (timestamp_str,))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # 最大値を選択して更新
+                            new_ask = max(record['ask_total'], existing[0])
+                            new_bid = max(record['bid_total'], existing[1])
+                            
+                            if new_ask > existing[0] or new_bid > existing[1]:
+                                cursor.execute(f"""
+                                    UPDATE {local_table}
+                                    SET ask_total = ?, bid_total = ?, price = ?
+                                    WHERE timestamp = ?
+                                """, (new_ask, new_bid, record['price'], timestamp_str))
+                                update_count += 1
+                        else:
+                            # 新規挿入
+                            cursor.execute(f"""
+                                INSERT INTO {local_table}
+                                (timestamp, ask_total, bid_total, price)
+                                VALUES (?, ?, ?, ?)
+                            """, (timestamp_str, record['ask_total'], record['bid_total'], record['price']))
+                            new_count += 1
+                            
+                    except Exception as e:
+                        # 個別のレコードエラーは継続
+                        self.add_log(f"[{timeframe_name}] レコード処理エラー: {str(e)}", "DEBUG")
+                        continue
+                
+                self.add_log(f"[ローカルDB] {timeframe_name}: 新規{new_count}件、更新{update_count}件")
             
             self.conn.commit()
-            self.add_log("時間足データの取得完了（1分足DBへの保存はスキップ）")
+            self.add_log("時間足データの取得・保存完了")
                 
         except Exception as e:
             self.add_log(f"時間足データ取得エラー: {str(e)}", "ERROR")
