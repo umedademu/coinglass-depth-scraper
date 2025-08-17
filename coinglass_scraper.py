@@ -1325,54 +1325,43 @@ class ScraperGUI:
             timestamps = {}
             cursor = self.conn.cursor()
             
-            # 各時間足に対応する時間間隔（分単位）
-            timeframe_intervals = {
-                'order_book_shared': 5,    # 5分足
-                'order_book_15min': 15,    # 15分足
-                'order_book_30min': 30,    # 30分足
-                'order_book_1hour': 60,    # 1時間足
-                'order_book_2hour': 120,   # 2時間足
-                'order_book_4hour': 240,   # 4時間足
-                'order_book_daily': 1440   # 日足
+            # Supabaseテーブル名とローカルテーブル名のマッピング
+            table_mapping = {
+                'order_book_shared': 'order_book_5min',   # 5分足
+                'order_book_15min': 'order_book_15min',    # 15分足
+                'order_book_30min': 'order_book_30min',    # 30分足
+                'order_book_1hour': 'order_book_1hour',    # 1時間足
+                'order_book_2hour': 'order_book_2hour',    # 2時間足
+                'order_book_4hour': 'order_book_4hour',    # 4時間足
+                'order_book_daily': 'order_book_daily'     # 日足
             }
             
-            for table_name, interval_minutes in timeframe_intervals.items():
-                # それぞれの時間足に該当するデータをフィルタリングして最新を取得
-                if interval_minutes <= 60:  # 分足・時間足
-                    # 分が間隔で割り切れるデータをフィルタリング
-                    cursor.execute("""
-                        SELECT timestamp FROM order_book_history
-                        WHERE strftime('%M', timestamp) % ? = 0
-                        AND strftime('%S', timestamp) = '00'
-                        ORDER BY timestamp DESC
-                        LIMIT 1
-                    """, (interval_minutes,))
-                elif interval_minutes < 1440:  # 時間足（2時間、4時間）
-                    # 時間が間隔で割り切れるデータをフィルタリング
-                    hours_interval = interval_minutes // 60
-                    cursor.execute("""
-                        SELECT timestamp FROM order_book_history
-                        WHERE strftime('%H', timestamp) % ? = 0
-                        AND strftime('%M', timestamp) = '00'
-                        AND strftime('%S', timestamp) = '00'
-                        ORDER BY timestamp DESC
-                        LIMIT 1
-                    """, (hours_interval,))
-                else:  # 日足
-                    # 00:00:00のデータをフィルタリング
-                    cursor.execute("""
-                        SELECT timestamp FROM order_book_history
-                        WHERE strftime('%H:%M:%S', timestamp) = '00:00:00'
+            for supabase_table, local_table in table_mapping.items():
+                # 各時間足専用テーブルから最新タイムスタンプを取得
+                try:
+                    cursor.execute(f"""
+                        SELECT timestamp FROM {local_table}
                         ORDER BY timestamp DESC
                         LIMIT 1
                     """)
-                
-                result = cursor.fetchone()
-                if result:
-                    timestamps[table_name] = result[0]
-                else:
-                    timestamps[table_name] = None
-            
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        timestamps[supabase_table] = result[0]
+                        self.add_log(f"[{supabase_table}] 最新タイムスタンプ: {result[0]} (from {local_table})", "DEBUG")
+                    else:
+                        # テーブルが空の場合、デフォルト値を設定
+                        # 過去のデータを取得するために現在時刻から適切な期間前を設定
+                        from datetime import datetime, timedelta
+                        default_timestamp = (datetime.now() - timedelta(days=7)).isoformat()
+                        timestamps[supabase_table] = default_timestamp
+                        self.add_log(f"[{supabase_table}] データなし、デフォルト: {default_timestamp} (from {local_table})", "DEBUG")
+                        
+                except sqlite3.OperationalError as e:
+                    # テーブルが存在しない場合
+                    self.add_log(f"[{supabase_table}] テーブル {local_table} が存在しません: {str(e)}", "DEBUG")
+                    timestamps[supabase_table] = None
+                    
             return timestamps
             
         except Exception as e:
@@ -1385,16 +1374,28 @@ class ScraperGUI:
             if not records:
                 return
             
-            # 5分足データ（order_book_shared）をローカルDBに保存
-            # 他の時間足（15分、30分、1時間等）は必要に応じて追加
-            if table_name not in ['order_book_shared']:  # 現在は5分足のみ保存
-                self.add_log(f"[Realtime同期] {table_name}のデータは現在保存対象外です", "DEBUG")
+            # Supabaseテーブル名からローカルテーブル名へのマッピング
+            table_mapping = {
+                'order_book_shared': 'order_book_5min',  # 5分足
+                'order_book_15min': 'order_book_15min',   # 15分足
+                'order_book_30min': 'order_book_30min',   # 30分足
+                'order_book_1hour': 'order_book_1hour',   # 1時間足
+                'order_book_2hour': 'order_book_2hour',   # 2時間足
+                'order_book_4hour': 'order_book_4hour',   # 4時間足
+                'order_book_daily': 'order_book_daily'    # 日足
+            }
+            
+            # 対応するローカルテーブル名を取得
+            local_table = table_mapping.get(table_name)
+            if not local_table:
+                self.add_log(f"[Realtime同期] {table_name}は未対応のテーブルです", "DEBUG")
                 return
             
-            self.add_log(f"[Realtime同期] {table_name}から{len(records)}件のデータを保存開始", "INFO")
+            self.add_log(f"[Realtime同期] {table_name}から{len(records)}件のデータを{local_table}に保存開始", "INFO")
             
             cursor = self.conn.cursor()
             saved_count = 0
+            updated_count = 0
             
             for record in records:
                 try:
@@ -1404,9 +1405,9 @@ class ScraperGUI:
                         dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                         timestamp_str = dt.replace(tzinfo=None).isoformat()
                     
-                    # 既存データをチェック
-                    cursor.execute("""
-                        SELECT ask_total, bid_total FROM order_book_history
+                    # 既存データをチェック（専用テーブルから）
+                    cursor.execute(f"""
+                        SELECT ask_total, bid_total FROM {local_table}
                         WHERE timestamp = ?
                     """, (timestamp_str,))
                     
@@ -1414,23 +1415,24 @@ class ScraperGUI:
                     
                     if existing:
                         # 最大値を選択して更新
-                        if record['ask_total'] > existing[0] or record['bid_total'] > existing[1]:
-                            cursor.execute("""
-                                UPDATE order_book_history 
+                        new_ask = max(record['ask_total'], existing[0])
+                        new_bid = max(record['bid_total'], existing[1])
+                        
+                        # 値が更新される場合のみUPDATE
+                        if new_ask > existing[0] or new_bid > existing[1]:
+                            cursor.execute(f"""
+                                UPDATE {local_table}
                                 SET ask_total = ?, bid_total = ?, price = ?
                                 WHERE timestamp = ?
-                            """, (
-                                max(record['ask_total'], existing[0]),
-                                max(record['bid_total'], existing[1]),
-                                record['price'],
-                                timestamp_str
-                            ))
+                            """, (new_ask, new_bid, record['price'], timestamp_str))
+                            
                             if cursor.rowcount > 0:
-                                saved_count += 1
+                                updated_count += 1
+                                self.add_log(f"[Realtime同期] {local_table}: {timestamp_str} を更新 (Ask: {existing[0]:.0f} → {new_ask:.0f}, Bid: {existing[1]:.0f} → {new_bid:.0f})", "DEBUG")
                     else:
                         # 新規挿入
-                        cursor.execute("""
-                            INSERT INTO order_book_history 
+                        cursor.execute(f"""
+                            INSERT INTO {local_table}
                             (timestamp, ask_total, bid_total, price)
                             VALUES (?, ?, ?, ?)
                         """, (
@@ -1441,19 +1443,14 @@ class ScraperGUI:
                         ))
                         if cursor.rowcount > 0:
                             saved_count += 1
-                            
-                            # メモリ上の履歴にも追加（Realtime同期データは追加しない）
-                            # 第6段階修正：1分足グラフ用配列への混入を防ぐためコメントアウト
-                            # timestamp = datetime.fromisoformat(timestamp_str)
-                            # self.time_history.append(timestamp)
-                            # self.ask_history.append(record['ask_total'])
-                            # self.bid_history.append(record['bid_total'])
+                            self.add_log(f"[Realtime同期] {local_table}: {timestamp_str} を新規保存 (Ask: {record['ask_total']:.0f}, Bid: {record['bid_total']:.0f})", "DEBUG")
                             
                 except Exception as e:
                     # 個別のレコードエラーは継続
+                    self.add_log(f"[Realtime同期] レコード処理エラー: {str(e)}", "DEBUG")
                     continue
             
-            if saved_count > 0:
+            if saved_count > 0 or updated_count > 0:
                 self.conn.commit()
                 
                 # テーブル名から時間足名を取得
@@ -1468,7 +1465,15 @@ class ScraperGUI:
                 }
                 timeframe_name = timeframe_names.get(table_name, table_name)
                 
-                self.add_log(f"[Realtime同期] {timeframe_name}: {saved_count}件をローカルDBに保存")
+                # ログメッセージ作成
+                log_msg_parts = []
+                if saved_count > 0:
+                    log_msg_parts.append(f"新規{saved_count}件")
+                if updated_count > 0:
+                    log_msg_parts.append(f"更新{updated_count}件")
+                    
+                if log_msg_parts:
+                    self.add_log(f"[Realtime同期] {timeframe_name}: {', '.join(log_msg_parts)}を{local_table}に保存")
                 
                 # 最新タイムスタンプをCloudSyncManagerに通知
                 if self.cloud_sync and records:
@@ -1477,6 +1482,8 @@ class ScraperGUI:
                     self.cloud_sync.update_latest_timestamps(table_name, latest_timestamp)
                 
                 # グラフを更新（UIスレッドで実行）
+                # 注意：現在の時間足設定が5分足以上の場合のみ更新
+                # （1分足・3分足は影響を受けない）
                 self.root.after(100, self.update_graph)
                 
         except Exception as e:
