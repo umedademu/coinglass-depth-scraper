@@ -10,53 +10,84 @@ const OrderBookChart = dynamic(() => import('../components/OrderBookChart'), {
   loading: () => <div style={{ textAlign: 'center', padding: '3rem', color: '#888' }}>グラフを読み込み中...</div>
 })
 
+// タイムフレームの定義
+type Timeframe = '5min' | '15min' | '30min' | '1hour' | '2hour' | '4hour' | 'daily'
+
+interface TimeframeConfig {
+  label: string
+  table: string
+  interval: string
+}
+
+const timeframeConfigs: Record<Timeframe, TimeframeConfig> = {
+  '5min': { label: '5分足', table: 'order_book_shared', interval: '5分' },
+  '15min': { label: '15分足', table: 'order_book_15min', interval: '15分' },
+  '30min': { label: '30分足', table: 'order_book_30min', interval: '30分' },
+  '1hour': { label: '1時間足', table: 'order_book_1hour', interval: '1時間' },
+  '2hour': { label: '2時間足', table: 'order_book_2hour', interval: '2時間' },
+  '4hour': { label: '4時間足', table: 'order_book_4hour', interval: '4時間' },
+  'daily': { label: '日足', table: 'order_book_daily', interval: '1日' }
+}
+
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<OrderBookData[]>([])
   const [chartData, setChartData] = useState<OrderBookData[]>([]) // グラフ用データ（300件）
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('5min')
 
+  // 初回マウント時にlocalStorageから設定を復元
   useEffect(() => {
-    fetchData()
+    const saved = localStorage.getItem('selectedTimeframe')
+    if (saved && saved in timeframeConfigs) {
+      setSelectedTimeframe(saved as Timeframe)
+    }
   }, [])
 
-  const fetchData = async () => {
-    try {
-      console.log('Fetching data from Supabase...')
-      
-      // テーブル表示用：最新100件のデータを取得
-      const { data: tableData, error: tableError } = await supabase
-        .from('order_book_shared')
-        .select('*')
-        .eq('group_id', 'default-group')
-        .order('timestamp', { ascending: false })
-        .limit(100)
+  // タイムフレーム変更時にデータを再取得
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        console.log(`Fetching ${selectedTimeframe} data from Supabase...`)
+        const config = timeframeConfigs[selectedTimeframe]
+        
+        // テーブル表示用：最新100件のデータを取得
+        const { data: tableData, error: tableError } = await supabase
+          .from(config.table)
+          .select('*')
+          .eq('group_id', 'default-group')
+          .order('timestamp', { ascending: false })
+          .limit(100)
 
-      // グラフ表示用：最新300件のデータを取得
-      const { data: graphData, error: graphError } = await supabase
-        .from('order_book_shared')
-        .select('*')
-        .eq('group_id', 'default-group')
-        .order('timestamp', { ascending: false })
-        .limit(300)
+        // グラフ表示用：最新300件のデータを取得
+        const { data: graphData, error: graphError } = await supabase
+          .from(config.table)
+          .select('*')
+          .eq('group_id', 'default-group')
+          .order('timestamp', { ascending: false })
+          .limit(300)
 
-      if (tableError || graphError) {
-        console.error('Error fetching data:', tableError || graphError)
-        setError((tableError || graphError)?.message || 'Error fetching data')
-      } else {
-        console.log('✅ Data fetched successfully:', tableData?.length, 'table records,', graphData?.length, 'graph records')
-        setData(tableData || [])
-        setChartData(graphData || [])
-        setLastUpdate(new Date())
+        if (tableError || graphError) {
+          console.error('Error fetching data:', tableError || graphError)
+          setError((tableError || graphError)?.message || 'Error fetching data')
+        } else {
+          console.log(`✅ ${config.label} data fetched successfully:`, tableData?.length, 'table records,', graphData?.length, 'graph records')
+          setData(tableData || [])
+          setChartData(graphData || [])
+          setLastUpdate(new Date())
+        }
+      } catch (err) {
+        console.error('Unexpected error:', err)
+        setError('Unexpected error occurred')
+      } finally {
+        setLoading(false)
       }
-    } catch (err) {
-      console.error('Unexpected error:', err)
-      setError('Unexpected error occurred')
-    } finally {
-      setLoading(false)
     }
-  }
+    
+    fetchData()
+    localStorage.setItem('selectedTimeframe', selectedTimeframe)
+  }, [selectedTimeframe])
 
   // 最新のデータ（最初の1件）
   const latestData = data[0]
@@ -173,6 +204,40 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+            {/* タイムフレーム選択 */}
+            <div style={{
+              backgroundColor: '#2a2a2a',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '2rem',
+              display: 'flex',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
+              justifyContent: 'center'
+            }}>
+              {Object.entries(timeframeConfigs).map(([key, config]) => (
+                <button
+                  key={key}
+                  onClick={() => setSelectedTimeframe(key as Timeframe)}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    backgroundColor: selectedTimeframe === key ? '#3b82f6' : '#404040',
+                    color: '#ffffff',
+                    fontSize: '0.875rem',
+                    fontWeight: selectedTimeframe === key ? 'bold' : 'normal',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    opacity: loading ? 0.5 : 1
+                  }}
+                  disabled={loading}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
 
             {/* グラフ表示 */}
             {chartData.length > 0 && (
