@@ -41,7 +41,6 @@ export default function Home() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('5min')
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
-  const [showUpdateNotification, setShowUpdateNotification] = useState(false)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectAttemptsRef = useRef(0)
@@ -57,10 +56,6 @@ export default function Home() {
   // 新規データをリストに追加する関数（メモリリーク対策付き）
   const handleNewData = (newRecord: OrderBookData) => {
     console.log(`[Realtime] New data received for ${selectedTimeframe}:`, newRecord)
-    
-    // データ更新通知を表示
-    setShowUpdateNotification(true)
-    setTimeout(() => setShowUpdateNotification(false), 3000)
     
     // データを更新（最新データを先頭に追加）
     setData(prevData => {
@@ -323,25 +318,6 @@ export default function Home() {
                connectionStatus === 'error' ? 'エラー' : '切断'}
             </span>
           </div>
-
-          {/* データ更新通知 */}
-          {showUpdateNotification && (
-            <div style={{
-              position: 'absolute',
-              top: '3rem',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              backgroundColor: '#3b82f6',
-              color: '#fff',
-              padding: '0.5rem 1rem',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              animation: 'slideDown 0.3s ease-out',
-              zIndex: 10
-            }}>
-              データが更新されました
-            </div>
-          )}
         </div>
 
         {/* CSS アニメーション */}
@@ -349,16 +325,6 @@ export default function Home() {
           @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
-          }
-          @keyframes slideDown {
-            from {
-              opacity: 0;
-              transform: translateX(-50%) translateY(-10px);
-            }
-            to {
-              opacity: 1;
-              transform: translateX(-50%) translateY(0);
-            }
           }
         `}</style>
         
