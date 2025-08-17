@@ -85,7 +85,7 @@ export default function Home() {
           <li>「Console」タブを選択</li>
           <li>以下が表示されることを確認：
             <ul style={{ marginTop: '0.5rem', marginLeft: '1.5rem' }}>
-              <li>"Supabase connected successfully"</li>
+              <li>&quot;Supabase connected successfully&quot;</li>
               <li>各時間足テーブルからのデータ</li>
               <li>エラーが表示されていないこと</li>
             </ul>
