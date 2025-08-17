@@ -155,17 +155,14 @@ class RealtimeSync:
             self.logger.debug(f"[Realtime] ペイロードのキー: {list(payload.keys())}")
             self.logger.debug(f"[Realtime] ペイロード詳細: {payload}")
             
-            # 複数のキー名に対応
-            event_type = (
-                payload.get('type') or 
-                payload.get('event') or 
-                payload.get('eventType', 'UNKNOWN')
-            )
+            # 正しいペイロード構造に対応
+            event_type = payload.get('data', {}).get('type', 'UNKNOWN')
             
             self.logger.debug(f"[Realtime] イベントタイプ: {event_type}")
             
             if event_type in ['INSERT', 'UPDATE']:
-                new_data = payload.get('new', {})
+                # 正しいペイロード構造からデータを取得
+                new_data = payload.get('data', {}).get('record', {})
                 
                 if new_data and self.update_callback:
                     # メインスレッドのコールバックを呼び出す
