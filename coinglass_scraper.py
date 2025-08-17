@@ -1209,11 +1209,13 @@ class ScraperGUI:
             if not records:
                 return
             
-            # 重要な修正：1分足DB（order_book_history）には1分足データのみを保存
-            # 5分足以上のデータは保存しない（グラフのギザギザを防ぐ）
-            if table_name != 'order_book_1min':  # 1分足以外は保存しない
-                self.add_log(f"[Realtime同期] {table_name}のデータは1分足DBには保存しません", "DEBUG")
+            # 5分足データ（order_book_shared）をローカルDBに保存
+            # 他の時間足（15分、30分、1時間等）は必要に応じて追加
+            if table_name not in ['order_book_shared']:  # 現在は5分足のみ保存
+                self.add_log(f"[Realtime同期] {table_name}のデータは現在保存対象外です", "DEBUG")
                 return
+            
+            self.add_log(f"[Realtime同期] {table_name}から{len(records)}件のデータを保存開始", "INFO")
             
             cursor = self.conn.cursor()
             saved_count = 0

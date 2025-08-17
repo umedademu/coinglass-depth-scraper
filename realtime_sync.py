@@ -151,7 +151,18 @@ class RealtimeSync:
     def _process_update(self, table_name: str, timeframe_name: str, payload: Dict[str, Any]):
         """更新イベントを同期的に処理"""
         try:
-            event_type = payload.get('eventType', 'UNKNOWN')
+            # デバッグ: ペイロード全体を出力
+            self.logger.debug(f"[Realtime] ペイロードのキー: {list(payload.keys())}")
+            self.logger.debug(f"[Realtime] ペイロード詳細: {payload}")
+            
+            # 複数のキー名に対応
+            event_type = (
+                payload.get('type') or 
+                payload.get('event') or 
+                payload.get('eventType', 'UNKNOWN')
+            )
+            
+            self.logger.debug(f"[Realtime] イベントタイプ: {event_type}")
             
             if event_type in ['INSERT', 'UPDATE']:
                 new_data = payload.get('new', {})
@@ -161,11 +172,15 @@ class RealtimeSync:
                     self.update_callback(table_name, timeframe_name, new_data)
                     
                     msg = f"[Realtime] {timeframe_name}の更新を検出"
-                    self.logger.debug(msg)
+                    self.logger.info(msg)  # debugからinfoに変更して確実に表示
+                    if self.log_callback:
+                        self.log_callback(msg, "INFO")
                     
         except Exception as e:
             msg = f"[Realtime] 更新処理エラー: {e}"
             self.logger.error(msg)
+            if self.log_callback:
+                self.log_callback(msg, "ERROR")
     
     async def _run_async(self):
         """非同期イベントループを実行"""
