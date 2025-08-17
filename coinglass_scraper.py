@@ -1016,6 +1016,36 @@ class ScraperGUI:
                 ON order_book_history(timestamp)
             """)
             
+            # 時間足専用テーブルの作成（第1段階実装）
+            timeframe_tables = [
+                ('order_book_5min', '5分足'),
+                ('order_book_15min', '15分足'),
+                ('order_book_30min', '30分足'),
+                ('order_book_1hour', '1時間足'),
+                ('order_book_2hour', '2時間足'),
+                ('order_book_4hour', '4時間足'),
+                ('order_book_daily', '日足')
+            ]
+            
+            for table_name, timeframe_name in timeframe_tables:
+                # テーブル作成
+                cursor.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {table_name} (
+                        timestamp TEXT PRIMARY KEY,
+                        ask_total REAL NOT NULL,
+                        bid_total REAL NOT NULL,
+                        price REAL NOT NULL
+                    )
+                """)
+                
+                # インデックス作成
+                cursor.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_timestamp 
+                    ON {table_name}(timestamp)
+                """)
+                
+                self.add_log(f"時間足専用テーブルを作成しました: {table_name}")
+            
             self.conn.commit()
             self.add_log("データベースを初期化しました")
             
