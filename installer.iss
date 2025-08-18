@@ -2,7 +2,7 @@
 ; Inno Setup 6用
 
 #define MyAppName "Coinglass Scraper"
-#define MyAppVersion "1.20"
+#define MyAppVersion "1.30"
 #define MyAppPublisher "Coinglass Scraper Development Team"
 #define MyAppURL "https://github.com/umedademu/coinglass-depth-scraper"
 #define MyAppExeName "CoinglassScraper.exe"
@@ -67,7 +67,7 @@ Source: "{#MyAppIconName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion
 ; ドキュメント（オプション）
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "TRAY_README.md"; DestDir: "{app}"; Flags: ignoreversion
+; Source: "TRAY_README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; プログラムフォルダのショートカット（常に作成）
