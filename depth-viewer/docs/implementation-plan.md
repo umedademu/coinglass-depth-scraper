@@ -134,48 +134,79 @@ Supabaseに接続し、データが取得できることを確認する。
 
 ---
 
-### 第3段階：統合グラフの実装 🎯難易度: 45/100
+### 第3段階：統合グラフの実装 ✅完了
 
 #### 目標
-Chart.jsを使用して、売り板・買い板・価格を1つの統合グラフで表示する。
+Chart.jsを使用して、売り板・買い板・価格を1つの統合グラフで表示する。垂直方向に分離された3つのエリアで各データを表示。UIは純粋なグラフのみとし、余計な装飾は一切含めない。
 
 #### タスク
-- Chart.jsライブラリのインストールと設定
-- **1つの統合グラフの実装**
+- Chart.jsライブラリのインストールと設定（chart.js、react-chartjs-2）
+- **1つの統合グラフの実装（垂直分離）**
   - 3つのデータセット（売り板、買い板、価格）
-  - 初期1000データポイントを表示（スクロールで追加可能）
+  - 初期1000データポイントを表示
   - テーブルは第2段階のまま維持（確認用）
-- 売り板（赤色）の実装
-  - **右Y軸、反転表示（多いほど下に迫ってくる表現）**
-- 買い板（緑色）の実装
-  - **左Y軸、通常表示**
-- 価格（白色）の実装
-  - **中央Y軸またはオーバーレイ表示**
-  - 線を太めに設定（視認性向上）
-- Chart.jsの複数Y軸機能を活用
+  - **グラフ高さ: 800px固定**
+  - **グラフのみ表示（タイトル・凡例・説明文は一切なし）**
+- **データの正規化（0-100範囲）**
+  - 売り板: 70-100の範囲（上部30%）
+  - 価格: 30-70の範囲（中央40%）
+  - 買い板: 0-30の範囲（下部30%）
+- **共通スケール正規化**
+  - ASKとBIDの範囲を比較し、大きい方を基準に正規化
+  - `maxRange = Math.max(askRange, bidRange)`を使用
+  - 1 BTCの視覚的な高さをASK/BIDで統一
+- 売り板（明るい赤色 rgb(248, 113, 113)）の実装
+  - **上部30%エリア、反転表示（値が大きいほど下に）**
+  - **エリアチャート（塗りつぶし）、fill.target: { value: 100 }**
+  - **共通スケールで正規化**
+- 買い板（明るい緑色 rgb(74, 222, 128)）の実装
+  - **下部30%エリア、通常表示**
+  - **エリアチャート（塗りつぶし）、fill.target: { value: 0 }**
+  - **共通スケールで正規化**
+- 価格（オレンジ色 #ff9500）の実装
+  - **中央40%エリア**
+  - 線を太めに設定（borderWidth: 3）
+  - 塗りつぶしなし（線グラフ）
+- **Y軸ラベルの表示仕様**
+  - **数字のみ表示（「BTC(売)」などの単位や説明は付けない）**
+  - **実データの最大値までのみラベル表示**
+  - 売り板: 実際の最小値～最大値の範囲でラベル表示
+  - 買い板: 実際の最小値～最大値の範囲でラベル表示
+  - 価格: $記号付きで表示（例: $117,000）
+  - **共通スケールでグラフは描画するが、ラベルは実データ範囲に制限**
+- **グラフUIの設定**
+  - 凡例（legend）を非表示（display: false）
+  - グラフタイトルなし
+  - 説明パネルなし
+  - 純粋なグラフコンテナのみ
 - X軸（時刻）の共通化
-- グリッド線とダークテーマの適用
-- インタラクションモードの設定（mode: 'index', intersect: false）
+- グリッド線とダークテーマの適用（背景: #0a0a0a、コンテナ: #1e1e1e）
 
 #### 確認項目
 ```
 ✅ ユーザーへの確認指示：
 「実装が完了しました。以下をチェックしてください：
 1. http://localhost:3000 にアクセス
-2. 画面中央に1つの統合グラフが表示される：
-   - 売り板の推移（赤色の線、右Y軸、下向きに成長）
-   - 買い板の推移（緑色の線、左Y軸、上向きに成長）
-   - 価格の推移（白色の線、中央に表示）
-3. グラフの背景がダーク（#1e1e1e）
-4. **3つのデータが1つのグラフ内に統合表示される**
-5. グリッド線が薄く表示される
-6. X軸に時刻、複数のY軸にそれぞれの値が表示される
-7. **売り板の反転表示が正しく動作している**
-8. マウスホバーで3つの値が同時に表示される
-9. グラフに約1000個のデータポイントが表示される
-10. 価格線が視認しやすい
+2. 画面中央に1つの統合グラフ（高さ800px）が表示される：
+   - 売り板の推移（明るい赤色のエリアチャート、上部30%、反転表示）
+   - 買い板の推移（明るい緑色のエリアチャート、下部30%、通常表示）
+   - 価格の推移（オレンジ色の線、中央40%）
+3. グラフの背景がダーク（#0a0a0a）
+4. **3つのデータが垂直方向に分離されて表示される**
+5. **売り板（上）と買い板（下）が重ならない**
+6. **価格チャートが中央40%のエリアに収まっている**
+7. グリッド線が薄く表示される
+8. **Y軸ラベルが数字のみで表示される：**
+   - 左側: 4,746、7,317など（単位や説明なし）
+   - 右側: $117,231など（価格のみ$記号付き）
+9. **Y軸ラベルが実データの最大値までで制限される**
+10. **グラフタイトル・凡例・説明文が一切表示されない**
+11. **売り板の反転表示（値が大きいほど下に）**
+12. マウスホバーで3つの値がツールチップに表示される（実際の値）
+13. グラフに約1000個のデータポイントが表示される
+14. 価格線がオレンジ色で太めに表示される
 
-グラフが正しく表示されていればOKです！」
+グラフが正しく垂直分離され、UIが最小限になっていればOKです！」
 ```
 
 ---
@@ -191,10 +222,20 @@ Chart.jsを使用して、売り板・買い板・価格を1つの統合グラ�
   - ドラッグでのパン（移動）機能
 - **ズーム機能の実装**
   - ホイール操作で拡大・縮小
-  - ダブルクリックでリセット
+  - ズームリセットボタンの追加
 - **パン機能の実装**
   - ドラッグで表示範囲を移動
   - 範囲制限の設定
+- **動的スケール調整**
+  - 表示範囲のデータから最小値・最大値を再計算
+  - ズーム・パン操作時に自動的にスケール更新
+  - ASK/BIDの共通スケールも動的に調整
+- **表示範囲インジケーター**
+  - 現在の表示範囲をグラフ上部に表示
+  - 「表示範囲: X / 535 ～ Y / 535 (ズーム中)」形式
+- **動的スケール情報パネル**
+  - グラフ下部に現在のスケール情報を表示
+  - 売り板・買い板の範囲と共通スケールを表示
 - **テーブル表示の削除**
   - グラフだけで十分なため開発用テーブルを削除
   - UIをシンプルに整理
@@ -208,16 +249,26 @@ Chart.jsを使用して、売り板・買い板・価格を1つの統合グラ�
 3. マウスホイールを回転：
    - グラフが拡大・縮小される
    - スムーズにズーム動作
-4. グラフ上でダブルクリック：
-   - ズームがリセットされる
+   - Y軸の値が自動的に更新される
+4. ズームリセットボタン：
+   - ズーム中のみ有効になる
+   - クリックで全体表示に戻る
 5. グラフをドラッグ：
    - 表示範囲が移動する
    - パン操作がスムーズ
-6. ズーム後の状態：
+6. 表示範囲インジケーター：
+   - グラフ上部に現在の表示範囲が表示される
+   - ズーム/パン時に動的に更新される
+7. 動的スケール情報：
+   - グラフ下部にASK/BIDの範囲が表示される
+   - 共通スケールの値が表示される
+   - ズーム/パン時に自動更新される
+8. ズーム後の状態：
    - 売り板の反転表示が維持される
    - 3つのデータが正しく表示される
+   - 1 BTCの高さがASK/BIDで統一される
 
-グラフ操作が快適に動作すればOKです！」
+グラフ操作と動的スケール調整が動作すればOKです！」
 ```
 
 ---
@@ -368,8 +419,8 @@ Supabase RealtimeでWebSocket接続し、データ更新時に自動的にグラ
 - スマートフォン用の縦画面対応
 - タブレット用の最適化
 - **インタラクション改善**
-  - 線ベースの当たり判定（Chart.js interaction mode: 'index'）※第3段階で基本実装済み
-  - ポップアップツールチップをヘッダー表示に変更
+  - 線ベースの当たり判定（Chart.js interaction mode: 'index', intersect: false）
+  - ツールチップの改善（実データ値の表示）
   - X軸に日付変更点（0:00）で日付表示を追加
 - パフォーマンス最適化
 
@@ -567,57 +618,172 @@ const loadMoreData = async (timeframe) => {
 ### 統合グラフ設定例
 
 ```javascript
+// 共通スケールの計算
+const askRange = maxAsk - minAsk
+const bidRange = maxBid - minBid
+const maxRange = Math.max(askRange, bidRange) // 共通スケール
+
+// データの正規化（垂直分離用・共通スケール適用）
+const normalizedAskData = sortedData.map(d => {
+  // ASK（売り板）: 70-100の範囲（上部30%）、反転表示、共通スケール使用
+  const normalizedValue = ((d.ask_total - minAsk) / maxRange) * 30
+  return 100 - normalizedValue // 反転表示
+})
+
+const normalizedBidData = sortedData.map(d => {
+  // BID（買い板）: 0-30の範囲（下部30%）、共通スケール使用
+  return ((d.bid_total - minBid) / maxRange) * 30
+})
+
+const normalizedPriceData = sortedData.map(d => {
+  // 価格: 30-70の範囲（中央40%）
+  const priceRange = maxPrice - minPrice || 1
+  return ((d.price - minPrice) / priceRange) * 40 + 30
+})
+
 // 3つのデータセットを持つ1つのグラフ
 const chartData = {
   labels: timestamps,
   datasets: [
     {
       label: '売り板',
-      data: askData,
-      borderColor: 'red',
-      yAxisID: 'y-ask'
+      data: normalizedAskData,
+      borderColor: 'rgb(248, 113, 113)',
+      backgroundColor: 'rgba(248, 113, 113, 0.3)',
+      fill: { target: { value: 100 }, above: 'rgba(220, 38, 38, 0.3)' },
+      yAxisID: 'y-normalized',
+      originalData: sortedData.map(d => d.ask_total)  // ツールチップ用
     },
     {
       label: '買い板',
-      data: bidData,
-      borderColor: 'green',
-      yAxisID: 'y-bid'
+      data: normalizedBidData,
+      borderColor: 'rgb(74, 222, 128)',
+      backgroundColor: 'rgba(74, 222, 128, 0.3)',
+      fill: { target: { value: 0 }, below: 'rgba(34, 197, 94, 0.3)' },
+      yAxisID: 'y-normalized',
+      originalData: sortedData.map(d => d.bid_total)  // ツールチップ用
     },
     {
       label: '価格',
-      data: priceData,
-      borderColor: 'white',
-      borderWidth: 2,
-      yAxisID: 'y-price'
+      data: normalizedPriceData,
+      borderColor: '#ff9500',
+      borderWidth: 3,
+      fill: false,
+      yAxisID: 'y-normalized',
+      originalData: sortedData.map(d => d.price)  // ツールチップ用
     }
   ]
 };
 
 const chartOptions = {
-  interaction: {
-    mode: 'index',        // 縦軸全体が当たり判定
-    intersect: false      // ポイント上でなくてもOK
+  plugins: {
+    legend: {
+      display: false  // 凡例を非表示
+    },
+    tooltip: {
+      // ツールチップで実データ値を表示
+      callbacks: {
+        label: function(context) {
+          const originalData = context.dataset.originalData
+          const value = originalData[context.dataIndex]
+          const label = context.dataset.label
+          if (label.includes('価格')) {
+            return `${label}: $${value.toLocaleString()}`
+          } else {
+            return `${label}: ${value.toLocaleString()} BTC`
+          }
+        }
+      }
+    }
   },
   scales: {
-    'y-ask': {
-      position: 'right',
-      reverse: true,  // 反転表示
-      grid: { drawOnChartArea: false }
-    },
-    'y-bid': {
+    'y': {  // Y軸（左側）
       position: 'left',
-      grid: { drawOnChartArea: false }
-    },
-    'y-price': {
-      position: 'right',
-      grid: { drawOnChartArea: false },
-      ticks: { display: false }
+      min: 0,
+      max: 100,
+      ticks: {
+        callback: function(value) {
+          // 70-100の範囲（売り板） - 反転表示
+          if (value >= 70 && value <= 100) {
+            const actualValue = minAsk + ((100 - value) / 30) * maxRange
+            // 実データ最大値を超える場合は表示しない
+            if (actualValue > maxAsk) return ''
+            return Math.round(actualValue).toLocaleString()  // 数字のみ
+          }
+          // 0-30の範囲（買い板）
+          if (value >= 0 && value <= 30) {
+            const actualValue = minBid + (value / 30) * maxRange
+            // 実データ最大値を超える場合は表示しない
+            if (actualValue > maxBid) return ''
+            return Math.round(actualValue).toLocaleString()  // 数字のみ
+          }
+          // 30-70の範囲（価格）
+          if (value > 30 && value < 70) {
+            const actualValue = minPrice + ((value - 30) / 40) * (maxPrice - minPrice)
+            return `$${Math.round(actualValue).toLocaleString()}`  // 価格のみ$付き
+          }
+          return ''
+        }
+      }
     }
   }
 };
 ```
 
-### UI改善実装
+### 動的スケール調整実装
+
+```javascript
+// 表示範囲の管理とスケール再計算
+const [visibleRange, setVisibleRange] = useState({ min: 0, max: data.length - 1 })
+
+// 表示範囲のデータから動的にスケールを計算
+const { minAsk, maxAsk, minBid, maxBid, maxRange } = useMemo(() => {
+  const visibleData = data.slice(visibleRange.min, visibleRange.max + 1)
+  const askValues = visibleData.map(d => d.ask_total)
+  const bidValues = visibleData.map(d => d.bid_total)
+  
+  const minAsk = Math.min(...askValues)
+  const maxAsk = Math.max(...askValues)
+  const minBid = Math.min(...bidValues)
+  const maxBid = Math.max(...bidValues)
+  
+  const askRange = maxAsk - minAsk
+  const bidRange = maxBid - minBid
+  const maxRange = Math.max(askRange, bidRange) || 1
+  
+  return { minAsk, maxAsk, minBid, maxBid, maxRange }
+}, [data, visibleRange])
+
+// ズーム・パン時のコールバック
+const chartOptions = {
+  plugins: {
+    zoom: {
+      pan: {
+        enabled: true,
+        mode: 'x',
+        onPan: ({ chart }) => {
+          const xScale = chart.scales.x
+          const min = Math.max(0, Math.floor(xScale.min))
+          const max = Math.min(data.length - 1, Math.ceil(xScale.max))
+          setVisibleRange({ min, max })
+        }
+      },
+      zoom: {
+        wheel: { enabled: true, speed: 0.1 },
+        mode: 'x',
+        onZoom: ({ chart }) => {
+          const xScale = chart.scales.x
+          const min = Math.max(0, Math.floor(xScale.min))
+          const max = Math.min(data.length - 1, Math.ceil(xScale.max))
+          setVisibleRange({ min, max })
+        }
+      }
+    }
+  }
+}
+```
+
+### UI改善実装（第8段階）
 
 ```javascript
 // 1. 線ベースの当たり判定（縦軸全体でツールチップ表示）
@@ -746,31 +912,6 @@ CREATE INDEX idx_[timeframe]_group_id ON order_book_[timeframe](group_id);
 - [Chart.js公式ドキュメント](https://www.chartjs.org/docs/)
 - [chartjs-plugin-zoom公式ドキュメント](https://www.chartjs.org/chartjs-plugin-zoom/)
 - [デスクトップアプリ仕様書](./desktop-app-spec.md)
-
----
-
-## 🔄 変更履歴
-
-### 2025-01-19（午前）
-- 第3段階を「統合グラフ」に変更（2つの独立グラフ → 1つの統合グラフ）
-- 第4段階に「遅延読み込み」機能を追加
-- 第5段階に「メモリ管理」機能を追加  
-- 第6段階に「テーブル削除」タスクを追加
-- 第6段階に「インタラクション改善」を追加
-- 第7段階「動的データ取得」を新規追加
-- データ取得を300件 → 1000件に変更
-- メモリ上限を5000件に設定
-- テーブル表示を開発段階のみに限定（第6段階で削除）
-- UI改善実装のコード例を追加
-
-### 2025-01-19（午後）- 実装順序の再構成
-- **8段階に再編成**（7段階→8段階）
-- **第4段階を変更**: タイムフレーム切替 → グラフ基本操作（ズーム・パン、テーブル削除）
-- **第5段階を変更**: リアルタイム更新 → タイムフレーム切替（元の第4段階）
-- **第6段階を変更**: UI/UX最適化 → リアルタイム更新（元の第5段階）
-- **第7段階を修正**: ズーム機能を削除し、動的データ取得とメモリ管理に特化
-- **第8段階を新設**: UI/UX最終調整（元の第6段階）
-- **理由**: ズーム機能はグラフの基本機能なので早めに実装すべき
 
 ---
 

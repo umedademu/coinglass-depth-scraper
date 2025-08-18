@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { fetchTimeframeData, OrderBookData } from '@/lib/supabase'
 import MarketInfo from '@/components/MarketInfo'
 import OrderBookTable from '@/components/OrderBookTable'
+import UnifiedChart from '@/components/UnifiedChart'
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
@@ -13,7 +14,7 @@ export default function Home() {
 
   useEffect(() => {
     async function loadData() {
-      console.log('=== 第2段階：データ取得と表示 ===')
+      console.log('=== 第3段階：統合グラフの実装 ===')
       
       try {
         // デフォルト時間足（1時間足）から最新1000件のデータを取得
@@ -114,13 +115,16 @@ export default function Home() {
         fontSize: '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第2段階：データ取得と表示
+        Depth Viewer - 第3段階：統合グラフの実装
       </h1>
       
       {/* 市場情報の表示 */}
       <MarketInfo latestData={latestData} />
       
-      {/* データテーブルの表示 */}
+      {/* 統合グラフの表示 */}
+      <UnifiedChart data={data} />
+      
+      {/* データテーブルの表示（確認用・第6段階で削除予定） */}
       <OrderBookTable data={data} limit={100} />
       
       {/* データ統計情報 */}
