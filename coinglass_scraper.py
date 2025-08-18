@@ -1064,6 +1064,10 @@ class ScraperGUI:
         """時間足専用テーブルへの保存（最大値比較付き）"""
         try:
             cursor = self.conn.cursor()
+            # UTC付きタイムスタンプを保存
+            if timestamp.tzinfo is None:
+                # tzinfoがない場合はUTCとして扱う
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
             timestamp_str = timestamp.isoformat()
             
             # 既存データをチェック
@@ -1102,6 +1106,9 @@ class ScraperGUI:
         """データをデータベースに保存"""
         try:
             # タイムスタンプを分単位に丸める（秒を00にする）
+            # UTC情報を保持
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
             rounded_timestamp = timestamp.replace(second=0, microsecond=0)
             
             cursor = self.conn.cursor()
@@ -1254,11 +1261,11 @@ class ScraperGUI:
                 
                 for record in records:
                     try:
-                        # タイムスタンプからタイムゾーン情報を除去
+                        # タイムスタンプをUTC付きで保持
                         timestamp_str = record['timestamp']
-                        if '+' in timestamp_str or 'T' in timestamp_str:
-                            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                            timestamp_str = dt.replace(tzinfo=None).isoformat()
+                        if 'Z' in timestamp_str:
+                            timestamp_str = timestamp_str.replace('Z', '+00:00')
+                        # すでにUTC付きフォーマットなのでそのまま使用
                         
                         # 既存データをチェック
                         cursor.execute(f"""
@@ -1387,11 +1394,11 @@ class ScraperGUI:
             
             for record in records:
                 try:
-                    # タイムスタンプからタイムゾーン情報を除去
+                    # タイムスタンプをUTC付きで保持
                     timestamp_str = record['timestamp']
-                    if '+' in timestamp_str or 'T' in timestamp_str:
-                        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                        timestamp_str = dt.replace(tzinfo=None).isoformat()
+                    if 'Z' in timestamp_str:
+                        timestamp_str = timestamp_str.replace('Z', '+00:00')
+                    # すでにUTC付きフォーマットなのでそのまま使用
                     
                     # 既存データをチェック（専用テーブルから）
                     cursor.execute(f"""
