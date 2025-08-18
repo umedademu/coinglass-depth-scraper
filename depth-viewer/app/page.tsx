@@ -1,96 +1,144 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchTimeframeData, timeframes, OrderBookData } from '@/lib/supabase'
+import { fetchTimeframeData, OrderBookData } from '@/lib/supabase'
+import MarketInfo from '@/components/MarketInfo'
+import OrderBookTable from '@/components/OrderBookTable'
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<OrderBookData[]>([])
+  const [latestData, setLatestData] = useState<OrderBookData | null>(null)
 
   useEffect(() => {
-    async function testConnection() {
-      console.log('=== Supabase Connection Test Started ===')
+    async function loadData() {
+      console.log('=== 第2段階：データ取得と表示 ===')
       
       try {
-        // 接続成功メッセージ
-        console.log('✅ Supabase connected successfully')
-        console.log('Fetching data from all timeframe tables...\n')
-
-        // 各時間足テーブルからデータを取得
-        for (const timeframe of timeframes) {
-          console.log(`\n📊 ${timeframe.label} (${timeframe.table}):`)
-          console.log('----------------------------------------')
+        // デフォルト時間足（1時間足）から最新1000件のデータを取得
+        console.log('📊 1時間足データを取得中...')
+        const orderBookData = await fetchTimeframeData('1hour', 1000)
+        
+        console.log(`✅ ${orderBookData.length}件のデータを取得しました`)
+        
+        if (orderBookData.length > 0) {
+          setData(orderBookData)
+          setLatestData(orderBookData[orderBookData.length - 1])
           
-          const data = await fetchTimeframeData(timeframe.key, 10)
+          // デバッグ情報をコンソールに出力
+          console.log('最新データ:', {
+            timestamp: orderBookData[orderBookData.length - 1].timestamp,
+            price: orderBookData[orderBookData.length - 1].price,
+            ask_total: orderBookData[orderBookData.length - 1].ask_total,
+            bid_total: orderBookData[orderBookData.length - 1].bid_total,
+            ratio: orderBookData[orderBookData.length - 1].bid_total / 
+                   orderBookData[orderBookData.length - 1].ask_total
+          })
           
-          if (data.length > 0) {
-            console.log(`✓ Found ${data.length} records`)
-            console.log('Latest 3 records:')
-            
-            // 最新3件のデータを表示
-            data.slice(0, 3).forEach((record, index) => {
-              console.log(`  ${index + 1}. Timestamp: ${record.timestamp}`)
-              console.log(`     Ask Total: ${record.ask_total.toLocaleString()} BTC`)
-              console.log(`     Bid Total: ${record.bid_total.toLocaleString()} BTC`)
-              console.log(`     Price: $${record.price.toLocaleString()}`)
-              console.log(`     Ratio: ${(record.bid_total / record.ask_total).toFixed(2)}`)
-            })
-          } else {
-            console.log('⚠️ No data found in this table')
-          }
+          console.log('最古データ:', {
+            timestamp: orderBookData[0].timestamp,
+            price: orderBookData[0].price
+          })
         }
-
-        console.log('\n=== Connection Test Completed Successfully ===')
+        
         setLoading(false)
       } catch (err) {
-        console.error('❌ Connection failed:', err)
-        setError(err instanceof Error ? err.message : 'Unknown error')
+        console.error('❌ データ取得エラー:', err)
+        setError(err instanceof Error ? err.message : 'データの取得に失敗しました')
         setLoading(false)
       }
     }
 
-    testConnection()
+    loadData()
   }, [])
 
-  return (
-    <main style={{ padding: '2rem' }}>
-      <h1 style={{ marginBottom: '2rem' }}>Depth Viewer - 第1段階：Supabase接続確認</h1>
-      
-      <div style={{ 
-        padding: '1.5rem',
-        backgroundColor: '#2a2a2a',
-        borderRadius: '8px',
-        marginBottom: '1rem'
+  if (loading) {
+    return (
+      <main style={{ 
+        padding: '2rem',
+        minHeight: '100vh',
+        backgroundColor: '#0a0a0a'
       }}>
-        <h2 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>接続状態</h2>
-        {loading && <p>⏳ Supabaseに接続中...</p>}
-        {!loading && !error && (
-          <p style={{ color: '#4ade80' }}>✅ 接続成功！コンソールを確認してください（F12）</p>
-        )}
-        {error && (
-          <p style={{ color: '#f87171' }}>❌ エラー: {error}</p>
-        )}
-      </div>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '50vh'
+        }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>
+            ⏳ データを読み込み中...
+          </div>
+          <div style={{ color: '#999' }}>
+            1時間足データ（最新1000件）を取得しています
+          </div>
+        </div>
+      </main>
+    )
+  }
 
-      <div style={{ 
-        padding: '1.5rem',
+  if (error) {
+    return (
+      <main style={{ 
+        padding: '2rem',
+        minHeight: '100vh',
+        backgroundColor: '#0a0a0a'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '50vh'
+        }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#f87171' }}>
+            ❌ エラーが発生しました
+          </div>
+          <div style={{ color: '#999' }}>
+            {error}
+          </div>
+        </div>
+      </main>
+    )
+  }
+
+  return (
+    <main style={{ 
+      padding: '2rem',
+      minHeight: '100vh',
+      backgroundColor: '#0a0a0a'
+    }}>
+      <h1 style={{ 
+        marginBottom: '2rem',
+        fontSize: '2rem',
+        fontWeight: 'bold'
+      }}>
+        Depth Viewer - 第2段階：データ取得と表示
+      </h1>
+      
+      {/* 市場情報の表示 */}
+      <MarketInfo latestData={latestData} />
+      
+      {/* データテーブルの表示 */}
+      <OrderBookTable data={data} limit={100} />
+      
+      {/* データ統計情報 */}
+      <div style={{
+        marginTop: '2rem',
+        padding: '1rem',
         backgroundColor: '#1e1e1e',
         borderRadius: '8px',
-        fontFamily: 'monospace',
+        color: '#999',
         fontSize: '0.9rem'
       }}>
-        <h3 style={{ marginBottom: '0.5rem' }}>確認手順：</h3>
-        <ol style={{ marginLeft: '1.5rem', lineHeight: '1.8' }}>
-          <li>F12キーで開発者コンソールを開く</li>
-          <li>「Console」タブを選択</li>
-          <li>以下が表示されることを確認：
-            <ul style={{ marginTop: '0.5rem', marginLeft: '1.5rem' }}>
-              <li>&quot;Supabase connected successfully&quot;</li>
-              <li>各時間足テーブルからのデータ</li>
-              <li>エラーが表示されていないこと</li>
-            </ul>
-          </li>
-        </ol>
+        <div>📊 取得データ数: {data.length}件</div>
+        <div>📈 表示データ数: {Math.min(100, data.length)}件（最新100件）</div>
+        {data.length > 0 && (
+          <>
+            <div>🕐 データ期間: {new Date(data[0].timestamp).toLocaleString('ja-JP')} ～ {new Date(data[data.length - 1].timestamp).toLocaleString('ja-JP')}</div>
+          </>
+        )}
       </div>
     </main>
   )
