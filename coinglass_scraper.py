@@ -1409,12 +1409,12 @@ class ScraperGUI:
                     existing = cursor.fetchone()
                     
                     if existing:
-                        # 最大値を選択して更新
-                        new_ask = max(record['ask_total'], existing[0])
-                        new_bid = max(record['bid_total'], existing[1])
+                        # Realtime同期はSupabaseの値を絶対値として採用（最大値比較しない）
+                        new_ask = record['ask_total']
+                        new_bid = record['bid_total']
                         
-                        # 値が更新される場合のみUPDATE
-                        if new_ask > existing[0] or new_bid > existing[1]:
+                        # 値が変更されている場合のみUPDATE（増減に関わらず）
+                        if new_ask != existing[0] or new_bid != existing[1]:
                             cursor.execute(f"""
                                 UPDATE {table_name}
                                 SET ask_total = ?, bid_total = ?, price = ?
@@ -1468,7 +1468,7 @@ class ScraperGUI:
                     log_msg_parts.append(f"更新{updated_count}件")
                     
                 if log_msg_parts:
-                    self.add_log(f"[Realtime同期] {timeframe_name}: {', '.join(log_msg_parts)}を{local_table}に保存")
+                    self.add_log(f"[Realtime同期] {timeframe_name}: {', '.join(log_msg_parts)}を{table_name}に保存")
                 
                 # 最新タイムスタンプをCloudSyncManagerに通知
                 if self.cloud_sync and records:
