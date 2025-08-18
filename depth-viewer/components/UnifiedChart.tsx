@@ -107,7 +107,8 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
             above: 'rgba(248, 113, 113, 0.3)'
           },
           yAxisID: 'y',
-          tension: 0.1
+          tension: 0.1,
+          pointRadius: 0 // マーカーを非表示
         },
         {
           label: '買い板',
@@ -119,7 +120,8 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
             below: 'rgba(74, 222, 128, 0.3)'
           },
           yAxisID: 'y',
-          tension: 0.1
+          tension: 0.1,
+          pointRadius: 0 // マーカーを非表示
         },
         {
           label: '価格',
@@ -128,8 +130,9 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
           borderWidth: 3,
           backgroundColor: 'transparent',
           fill: false,
-          yAxisID: 'y',
-          tension: 0.1
+          yAxisID: 'y2', // 右側のY軸を使用
+          tension: 0.1,
+          pointRadius: 0 // マーカーを非表示
         }
       ]
     }
@@ -173,7 +176,7 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
             minRotation: 45
           }
         },
-        y: {
+        y: { // 左側Y軸（ASK/BID用）
           position: 'left',
           min: 0,
           max: 100,
@@ -201,8 +204,25 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
                 return Math.round(actualValue).toLocaleString() // 数字のみ
               }
               
-              // 30-70の範囲（価格）
-              if (numValue > 30 && numValue < 70) {
+              // 中央部分は表示しない
+              return ''
+            }
+          }
+        },
+        y2: { // 右側Y軸（価格用）
+          position: 'right',
+          min: 0,
+          max: 100,
+          grid: {
+            display: false // 右側Y軸のグリッドは非表示
+          },
+          ticks: {
+            color: '#999',
+            callback: function(value: any) {
+              const numValue = Number(value)
+              
+              // 30-70の範囲（価格）のみ表示
+              if (numValue >= 30 && numValue <= 70) {
                 const actualValue = minPrice + ((numValue - 30) / 40) * (maxPrice - minPrice)
                 return `$${Math.round(actualValue).toLocaleString()}` // 価格のみ$付き
               }
