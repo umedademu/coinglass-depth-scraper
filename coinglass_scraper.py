@@ -1225,17 +1225,7 @@ class ScraperGUI:
             # 第3段階：Supabaseデータとの比較・更新
             # 各時間足データを対応するローカルテーブルに保存
             
-            # Supabaseテーブル名とローカルテーブル名のマッピング
-            table_mapping = {
-                'order_book_5min': 'order_book_5min',
-                'order_book_15min': 'order_book_15min',
-                'order_book_30min': 'order_book_30min',
-                'order_book_1hour': 'order_book_1hour',
-                'order_book_2hour': 'order_book_2hour',
-                'order_book_4hour': 'order_book_4hour',
-                'order_book_daily': 'order_book_daily'
-            }
-            
+            # 時間足の表示名
             timeframe_names = {
                 'order_book_5min': '5分足',
                 'order_book_15min': '15分足',
@@ -1253,9 +1243,8 @@ class ScraperGUI:
                 if not records:
                     continue
                 
-                local_table = table_mapping.get(supabase_table)
-                if not local_table:
-                    continue
+                # Supabaseテーブル名とローカルテーブル名は同じ
+                local_table = supabase_table
                 
                 timeframe_name = timeframe_names.get(supabase_table, supabase_table)
                 self.add_log(f"[初期データ取得] {timeframe_name}: {len(records)}件取得")
@@ -1325,42 +1314,42 @@ class ScraperGUI:
             timestamps = {}
             cursor = self.conn.cursor()
             
-            # Supabaseテーブル名とローカルテーブル名のマッピング
-            table_mapping = {
-                'order_book_5min': 'order_book_5min',   # 5分足
-                'order_book_15min': 'order_book_15min',    # 15分足
-                'order_book_30min': 'order_book_30min',    # 30分足
-                'order_book_1hour': 'order_book_1hour',    # 1時間足
-                'order_book_2hour': 'order_book_2hour',    # 2時間足
-                'order_book_4hour': 'order_book_4hour',    # 4時間足
-                'order_book_daily': 'order_book_daily'     # 日足
-            }
+            # 処理対象のテーブルリスト
+            tables = [
+                'order_book_5min',   # 5分足
+                'order_book_15min',  # 15分足
+                'order_book_30min',  # 30分足
+                'order_book_1hour',  # 1時間足
+                'order_book_2hour',  # 2時間足
+                'order_book_4hour',  # 4時間足
+                'order_book_daily'   # 日足
+            ]
             
-            for supabase_table, local_table in table_mapping.items():
+            for table_name in tables:
                 # 各時間足専用テーブルから最新タイムスタンプを取得
                 try:
                     cursor.execute(f"""
-                        SELECT timestamp FROM {local_table}
+                        SELECT timestamp FROM {table_name}
                         ORDER BY timestamp DESC
                         LIMIT 1
                     """)
                     
                     result = cursor.fetchone()
                     if result:
-                        timestamps[supabase_table] = result[0]
-                        self.add_log(f"[{supabase_table}] 最新タイムスタンプ: {result[0]} (from {local_table})", "DEBUG")
+                        timestamps[table_name] = result[0]
+                        self.add_log(f"[{table_name}] 最新タイムスタンプ: {result[0]}", "DEBUG")
                     else:
                         # テーブルが空の場合、デフォルト値を設定
                         # 過去のデータを取得するために現在時刻から適切な期間前を設定
                         from datetime import datetime, timedelta, timezone
                         default_timestamp = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-                        timestamps[supabase_table] = default_timestamp
-                        self.add_log(f"[{supabase_table}] データなし、デフォルト: {default_timestamp} (from {local_table})", "DEBUG")
+                        timestamps[table_name] = default_timestamp
+                        self.add_log(f"[{table_name}] データなし、デフォルト: {default_timestamp}", "DEBUG")
                         
                 except sqlite3.OperationalError as e:
                     # テーブルが存在しない場合
-                    self.add_log(f"[{supabase_table}] テーブル {local_table} が存在しません: {str(e)}", "DEBUG")
-                    timestamps[supabase_table] = None
+                    self.add_log(f"[{table_name}] テーブルが存在しません: {str(e)}", "DEBUG")
+                    timestamps[table_name] = None
                     
             return timestamps
             
@@ -1374,24 +1363,23 @@ class ScraperGUI:
             if not records:
                 return
             
-            # Supabaseテーブル名からローカルテーブル名へのマッピング
-            table_mapping = {
-                'order_book_5min': 'order_book_5min',  # 5分足
-                'order_book_15min': 'order_book_15min',   # 15分足
-                'order_book_30min': 'order_book_30min',   # 30分足
-                'order_book_1hour': 'order_book_1hour',   # 1時間足
-                'order_book_2hour': 'order_book_2hour',   # 2時間足
-                'order_book_4hour': 'order_book_4hour',   # 4時間足
-                'order_book_daily': 'order_book_daily'    # 日足
-            }
+            # サポートされているテーブルのリスト
+            supported_tables = [
+                'order_book_5min',   # 5分足
+                'order_book_15min',  # 15分足
+                'order_book_30min',  # 30分足
+                'order_book_1hour',  # 1時間足
+                'order_book_2hour',  # 2時間足
+                'order_book_4hour',  # 4時間足
+                'order_book_daily'   # 日足
+            ]
             
-            # 対応するローカルテーブル名を取得
-            local_table = table_mapping.get(table_name)
-            if not local_table:
+            # テーブル名がサポートされているか確認
+            if table_name not in supported_tables:
                 self.add_log(f"[Realtime同期] {table_name}は未対応のテーブルです", "DEBUG")
                 return
             
-            self.add_log(f"[Realtime同期] {table_name}から{len(records)}件のデータを{local_table}に保存開始", "INFO")
+            self.add_log(f"[Realtime同期] {table_name}から{len(records)}件のデータを保存開始", "INFO")
             
             cursor = self.conn.cursor()
             saved_count = 0
@@ -1407,7 +1395,7 @@ class ScraperGUI:
                     
                     # 既存データをチェック（専用テーブルから）
                     cursor.execute(f"""
-                        SELECT ask_total, bid_total FROM {local_table}
+                        SELECT ask_total, bid_total FROM {table_name}
                         WHERE timestamp = ?
                     """, (timestamp_str,))
                     
@@ -1421,18 +1409,18 @@ class ScraperGUI:
                         # 値が更新される場合のみUPDATE
                         if new_ask > existing[0] or new_bid > existing[1]:
                             cursor.execute(f"""
-                                UPDATE {local_table}
+                                UPDATE {table_name}
                                 SET ask_total = ?, bid_total = ?, price = ?
                                 WHERE timestamp = ?
                             """, (new_ask, new_bid, record['price'], timestamp_str))
                             
                             if cursor.rowcount > 0:
                                 updated_count += 1
-                                self.add_log(f"[Realtime同期] {local_table}: {timestamp_str} を更新 (Ask: {existing[0]:.0f} → {new_ask:.0f}, Bid: {existing[1]:.0f} → {new_bid:.0f})", "DEBUG")
+                                self.add_log(f"[Realtime同期] {table_name}: {timestamp_str} を更新 (Ask: {existing[0]:.0f} → {new_ask:.0f}, Bid: {existing[1]:.0f} → {new_bid:.0f})", "DEBUG")
                     else:
                         # 新規挿入
                         cursor.execute(f"""
-                            INSERT INTO {local_table}
+                            INSERT INTO {table_name}
                             (timestamp, ask_total, bid_total, price)
                             VALUES (?, ?, ?, ?)
                         """, (
@@ -1443,7 +1431,7 @@ class ScraperGUI:
                         ))
                         if cursor.rowcount > 0:
                             saved_count += 1
-                            self.add_log(f"[Realtime同期] {local_table}: {timestamp_str} を新規保存 (Ask: {record['ask_total']:.0f}, Bid: {record['bid_total']:.0f})", "DEBUG")
+                            self.add_log(f"[Realtime同期] {table_name}: {timestamp_str} を新規保存 (Ask: {record['ask_total']:.0f}, Bid: {record['bid_total']:.0f})", "DEBUG")
                             
                 except Exception as e:
                     # 個別のレコードエラーは継続

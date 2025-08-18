@@ -125,47 +125,53 @@ def check_realtime_sync():
     print("   - 5分足の更新が15分足に影響しない")
     print("   - 各テーブルが適切なタイミングでのみ更新される")
 
-def test_table_mapping():
-    """テーブルマッピングのテスト"""
+def test_table_support():
+    """サポートされているテーブルのテスト"""
     print("\n" + "=" * 60)
-    print("テーブルマッピングテスト")
+    print("サポートテーブルテスト")
     print("=" * 60)
     
-    # マッピングの確認
-    table_mapping = {
-        'order_book_shared': 'order_book_5min',
-        'order_book_15min': 'order_book_15min',
-        'order_book_30min': 'order_book_30min',
-        'order_book_1hour': 'order_book_1hour',
-        'order_book_2hour': 'order_book_2hour',
-        'order_book_4hour': 'order_book_4hour',
-        'order_book_daily': 'order_book_daily'
-    }
+    # サポートされているテーブルのリスト
+    supported_tables = [
+        'order_book_5min',   # 5分足
+        'order_book_15min',  # 15分足
+        'order_book_30min',  # 30分足
+        'order_book_1hour',  # 1時間足
+        'order_book_2hour',  # 2時間足
+        'order_book_4hour',  # 4時間足
+        'order_book_daily'   # 日足
+    ]
     
-    print("\n[Supabase → ローカルテーブルマッピング]")
-    for supabase_table, local_table in table_mapping.items():
-        print(f"  {supabase_table:20} → {local_table}")
+    print("\n[サポートされているテーブル]")
+    for table in supported_tables:
+        print(f"  ✓ {table}")
     
     print("\n[テストケース]")
     test_cases = [
-        ('order_book_shared', 'order_book_5min', True),
-        ('order_book_15min', 'order_book_15min', True),
-        ('unknown_table', None, False),
-        ('order_book_1min', None, False),  # 1分足はSupabaseには存在しない
+        ('order_book_5min', True),
+        ('order_book_15min', True),
+        ('order_book_30min', True),
+        ('order_book_1hour', True),
+        ('order_book_2hour', True),
+        ('order_book_4hour', True),
+        ('order_book_daily', True),
+        ('order_book_shared', False),  # 古いテーブル名
+        ('unknown_table', False),
+        ('order_book_1min', False),  # 1分足はSupabaseには存在しない
     ]
     
-    for supabase_table, expected_local, should_process in test_cases:
-        local_table = table_mapping.get(supabase_table)
-        status = "✓" if (local_table == expected_local) else "✗"
+    for table_name, should_process in test_cases:
+        is_supported = table_name in supported_tables
+        status = "✓" if (is_supported == should_process) else "✗"
         process_msg = "処理される" if should_process else "スキップ"
-        print(f"  {status} {supabase_table:20} → {local_table or 'None':20} ({process_msg})")
+        print(f"  {status} {table_name:20} ({process_msg})")
 
 if __name__ == "__main__":
     # Realtime同期の確認
     check_realtime_sync()
     
-    # テーブルマッピングのテスト
-    test_table_mapping()
+    # サポートテーブルのテスト
+    test_table_support()
     
     print("\n" + "=" * 60)
     print("テスト完了")
