@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { fetchTimeframeData, OrderBookData } from '@/lib/supabase'
 import MarketInfo from '@/components/MarketInfo'
-import OrderBookTable from '@/components/OrderBookTable'
 import UnifiedChart from '@/components/UnifiedChart'
 
 export default function Home() {
@@ -14,7 +13,7 @@ export default function Home() {
 
   useEffect(() => {
     async function loadData() {
-      console.log('=== 第3段階：統合グラフの実装 ===')
+      console.log('=== 第4段階：グラフ基本操作とUI整理 ===')
       
       try {
         // デフォルト時間足（1時間足）から最新1000件のデータを取得
@@ -115,17 +114,14 @@ export default function Home() {
         fontSize: '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第3段階：統合グラフの実装
+        Depth Viewer - 第4段階：グラフ基本操作とUI整理
       </h1>
       
       {/* 市場情報の表示 */}
       <MarketInfo latestData={latestData} />
       
-      {/* 統合グラフの表示 */}
+      {/* 統合グラフの表示（ズーム・パン機能付き） */}
       <UnifiedChart data={data} />
-      
-      {/* データテーブルの表示（確認用・第6段階で削除予定） */}
-      <OrderBookTable data={data} limit={100} />
       
       {/* データ統計情報 */}
       <div style={{
@@ -137,10 +133,10 @@ export default function Home() {
         fontSize: '0.9rem'
       }}>
         <div>📊 取得データ数: {data.length}件</div>
-        <div>📈 表示データ数: {Math.min(100, data.length)}件（最新100件）</div>
         {data.length > 0 && (
           <>
             <div>🕐 データ期間: {new Date(data[0].timestamp).toLocaleString('ja-JP')} ～ {new Date(data[data.length - 1].timestamp).toLocaleString('ja-JP')}</div>
+            <div>🖱️ マウスホイール: ズーム | ドラッグ: パン（移動）</div>
           </>
         )}
       </div>

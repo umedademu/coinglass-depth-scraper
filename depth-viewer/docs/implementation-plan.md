@@ -224,33 +224,70 @@ Chart.jsを使用して、売り板・買い板・価格を1つの統合グラ�
 
 ---
 
-### 第4段階：グラフ基本操作とUI整理 🎯難易度: 30/100
+### 第4段階：グラフ基本操作とUI整理 ✅完了
 
 #### 目標
-グラフの基本的な操作機能（ズーム・パン）を実装し、不要なテーブルを削除する。
+グラフの基本的な操作機能（ズーム・パン）を実装し、不要なテーブルを削除する。動的スケール機能により、表示範囲に応じてグラフが自動的に最適化される。
+
+#### 設計方針（重要）
+- **ReactとChart.jsの責任分離が必須**
+  - React側：初期データの準備のみ（useMemoで1回だけ計算）
+  - Chart.js側：ズーム/パン時の動的更新を内部で処理
+  - **警告**：ズーム時にReactのstateやuseMemoを更新するとチャートが再生成されズームがリセットされる
+
+#### 実装手順（段階的アプローチ）
+1. **第1ステップ：純粋なズーム機能の実装**
+   - chartjs-plugin-zoomのインストール（hammerjs含む）
+   - SSR対応：`typeof window !== 'undefined'`で動的インポート
+   - 動的スケール更新を含めない基本的なズーム/パン機能のみ実装
+   - この段階でズーム状態が維持されることを確認
+
+2. **第2ステップ：動的スケール更新の追加**
+   - `updateDynamicScale`関数を`useCallback`で定義
+   - Chart.jsインスタンスを直接操作する設計
+   - `chart.data.datasets[n].data`を直接更新
+   - `chart.options.scales.y.ticks.callback`を動的に書き換え
+   - `chart.update('none')`でアニメーションなし更新
 
 #### タスク
-- **chartjs-plugin-zoomのインストール**
-  - マウスホイールでのズーム機能
-  - ドラッグでのパン（移動）機能
+- **chartjs-plugin-zoomの設定**
+  ```javascript
+  // プラグインの動的インポート（SSR対応）
+  let zoomPlugin: any
+  if (typeof window !== 'undefined') {
+    zoomPlugin = require('chartjs-plugin-zoom').default
+    ChartJS.register(zoomPlugin)
+  }
+  ```
 - **ズーム機能の実装**
-  - ホイール操作で拡大・縮小
-  - ズームリセットボタンの追加
-- **パン機能の実装**
-  - ドラッグで表示範囲を移動
-  - 範囲制限の設定
-- **動的スケール調整**
-  - 表示範囲のデータから最小値・最大値を再計算
-  - ズーム・パン操作時に自動的にスケール更新
-  - ASK/BIDの共通スケールも動的に調整
-- **表示範囲インジケーター**
-  - 現在の表示範囲をグラフ上部に表示
-  - 「表示範囲: X / 535 ～ Y / 535 (ズーム中)」形式
-- **動的スケール情報パネル**
-  - グラフ下部に現在のスケール情報を表示
-  - 売り板・買い板の範囲と共通スケールを表示
+  - `onZoomComplete: ({ chart }) => { updateDynamicScale(chart); setIsZoomed(true) }`
+  - `onPanComplete: ({ chart }) => { updateDynamicScale(chart); setIsZoomed(true) }`
+  - ズームリセットボタン（isZoomed時のみ表示）
+- **動的スケール調整の実装**
+  ```javascript
+  const updateDynamicScale = useCallback((chart: any) => {
+    // 1. 表示範囲の取得
+    const xScale = chart.scales.x
+    const visibleData = sortedData.slice(min, max + 1)
+    
+    // 2. 新しいスケール値の計算
+    // 3. データセットの直接更新（Reactの再レンダリングを避ける）
+    chart.data.datasets[0].data = normalizedAskData
+    
+    // 4. Y軸ラベルの更新
+    chart.options.scales.y.ticks.callback = function(value) { /* 動的計算 */ }
+    
+    // 5. アニメーションなし更新
+    chart.update('none')
+  }, [sortedData])
+  ```
+- **ASK/BIDの共通スケール維持**
+  - 表示範囲内のASK範囲とBID範囲を比較
+  - `maxRange = Math.max(askRange, bidRange)`で統一
+- **価格チャートの独立スケーリング**
+  - 価格は独自の最小値・最大値で正規化
 - **テーブル表示の削除**
-  - グラフだけで十分なため開発用テーブルを削除
+  - OrderBookTableコンポーネントの削除
   - UIをシンプルに整理
 
 #### 確認項目
@@ -262,26 +299,32 @@ Chart.jsを使用して、売り板・買い板・価格を1つの統合グラ�
 3. マウスホイールを回転：
    - グラフが拡大・縮小される
    - スムーズにズーム動作
-   - Y軸の値が自動的に更新される
+   - **Y軸ラベルが表示範囲に応じて動的に更新される**
+   - **グラフの形状自体が拡大される（山が大きく表示）**
 4. ズームリセットボタン：
-   - ズーム中のみ有効になる
+   - ズーム中のみ表示される
    - クリックで全体表示に戻る
-5. グラフをドラッグ：
+5. グラフをドラッグ（パン操作）：
    - 表示範囲が移動する
-   - パン操作がスムーズ
-6. 表示範囲インジケーター：
-   - グラフ上部に現在の表示範囲が表示される
-   - ズーム/パン時に動的に更新される
-7. 動的スケール情報：
-   - グラフ下部にASK/BIDの範囲が表示される
-   - 共通スケールの値が表示される
-   - ズーム/パン時に自動更新される
-8. ズーム後の状態：
+   - **ズームレベルが維持される（リセットされない）**
+   - **移動した範囲に応じてグラフが再正規化される**
+6. 動的スケール調整の動作：
+   - **表示範囲内のデータで最小値・最大値が再計算される**
+   - **グラフの山や谷が画面いっぱいに拡大表示される**
+   - **細かい変動が見やすくなる**
+7. ASK/BIDの共通スケール：
+   - **範囲が大きい方が30%枠をフルに使用**
+   - **小さい方は価格ライン側に余白が生じる**
+   - **両者の相対的な大きさが正しく維持される**
+8. 価格チャートの独立スケーリング：
+   - **表示範囲内の価格変動が中央40%枠いっぱいに表示**
+   - **細かい価格変動が見やすくなる**
+9. ズーム後の状態：
    - 売り板の反転表示が維持される
    - 3つのデータが正しく表示される
-   - 1 BTCの高さがASK/BIDで統一される
+   - ドラッグしてもズームが維持される
 
-グラフ操作と動的スケール調整が動作すればOKです！」
+グラフ操作と動的スケール調整が正しく動作すればOKです！」
 ```
 
 ---
@@ -387,21 +430,54 @@ Supabase RealtimeでWebSocket接続し、データ更新時に自動的にグラ
 #### 目標
 グラフをドラッグして過去のデータを動的に取得する機能と、効率的なメモリ管理を実装する。
 
+#### 設計方針
+- **第4段階の実装基盤を活用**
+  - `onPanComplete`で左端到達を検知
+  - `updateDynamicScale`でデータ追加後の再スケーリング
+- **X軸インデックス管理が重要**
+  - データを左側に追加するとインデックスがずれる
+  - 現在の表示位置を維持する処理が必須
+
 #### タスク
 - **動的データ取得の実装**
-  - 左端到達を検知（第4段階のパン機能を活用）
-  - 追加で1000件を取得（Supabase API）
-  - 既存データの左側に追加
+  ```javascript
+  const handlePanComplete = ({ chart }) => {
+    const xScale = chart.scales.x
+    if (xScale.min <= 0) {
+      // 左端到達を検知
+      loadMoreData()
+    }
+  }
+  ```
+- **データ追加時のX軸位置調整**
+  ```javascript
+  const loadMoreData = async () => {
+    const oldDataLength = sortedData.length
+    const newData = await fetchOlderData()
+    
+    // データを左側に追加
+    setSortedData([...newData, ...sortedData])
+    
+    // X軸インデックスを調整（重要）
+    const chart = chartRef.current
+    if (chart) {
+      const addedCount = newData.length
+      chart.options.scales.x.min += addedCount
+      chart.options.scales.x.max += addedCount
+      chart.update('none')  // 即座に反映
+    }
+  }
+  ```
 - **プリフェッチ機能**
   - 左端の80%に到達したら先読み開始
-  - スムーズな体験を提供
+  - `xScale.min < (dataLength * 0.2)`で判定
 - **ローディングインジケーター**
   - データ取得中の表示
   - グラフ上部に小さく表示
-- **完全なメモリ管理の実装**
+- **メモリ管理の実装**
   - 各時間足で最大5000件まで保持
-  - 5000件を超えたら古いデータから削除
-  - 「窓から見える景色」のように必要な分だけ保持
+  - 5000件を超えたら右端（新しいデータ）から削除
+  - X軸インデックスの再調整が必要
 
 #### 確認項目
 ```
@@ -628,30 +704,36 @@ const loadMoreData = async (timeframe) => {
 }
 ```
 
-### 統合グラフ設定例
+### 統合グラフ設定例（第4段階対応）
 
 ```javascript
-// 共通スケールの計算
-const askRange = maxAsk - minAsk
-const bidRange = maxBid - minBid
-const maxRange = Math.max(askRange, bidRange) // 共通スケール
+// 重要：ReactとChart.jsの責任分離
+// useMemoで初期データのみ計算、ズーム時の更新はChart.js内部で処理
 
-// データの正規化（垂直分離用・共通スケール適用）
+// 初期スケールの計算（固定値として使用）
+const scaleValues = useMemo(() => {
+  const askRange = maxAsk - minAsk
+  const bidRange = maxBid - minBid
+  const maxRange = Math.max(askRange, bidRange) // 共通スケール
+  return { minAsk, maxAsk, minBid, maxBid, minPrice, maxPrice, maxRange }
+}, [sortedData])
+
+// データの正規化（初期表示用）
 const normalizedAskData = sortedData.map(d => {
   // ASK（売り板）: 70-100の範囲（上部30%）、反転表示、共通スケール使用
-  const normalizedValue = ((d.ask_total - minAsk) / maxRange) * 30
+  const normalizedValue = ((d.ask_total - scaleValues.minAsk) / scaleValues.maxRange) * 30
   return 100 - normalizedValue // 反転表示
 })
 
 const normalizedBidData = sortedData.map(d => {
   // BID（買い板）: 0-30の範囲（下部30%）、共通スケール使用
-  return ((d.bid_total - minBid) / maxRange) * 30
+  return ((d.bid_total - scaleValues.minBid) / scaleValues.maxRange) * 30
 })
 
 const normalizedPriceData = sortedData.map(d => {
   // 価格: 30-70の範囲（中央40%）
-  const priceRange = maxPrice - minPrice || 1
-  return ((d.price - minPrice) / priceRange) * 40 + 30
+  const priceRange = scaleValues.maxPrice - scaleValues.minPrice || 1
+  return ((d.price - scaleValues.minPrice) / priceRange) * 40 + 30
 })
 
 // 3つのデータセットを持つ1つのグラフ
@@ -768,52 +850,80 @@ const chartOptions = {
 };
 ```
 
-### 動的スケール調整実装
+### 動的スケール調整実装（第4段階準拠）
 
 ```javascript
-// 表示範囲の管理とスケール再計算
-const [visibleRange, setVisibleRange] = useState({ min: 0, max: data.length - 1 })
+// 重要：Chart.js内部で動的更新、Reactの再レンダリングを避ける
 
-// 表示範囲のデータから動的にスケールを計算
-const { minAsk, maxAsk, minBid, maxBid, maxRange } = useMemo(() => {
-  const visibleData = data.slice(visibleRange.min, visibleRange.max + 1)
+// 動的スケール更新関数（Chart.jsインスタンスを直接操作）
+const updateDynamicScale = useCallback((chart: any) => {
+  if (!chart || !sortedData.length) return
+  
+  // 1. 表示範囲の取得
+  const xScale = chart.scales.x
+  const min = Math.max(0, Math.floor(xScale.min))
+  const max = Math.min(sortedData.length - 1, Math.ceil(xScale.max))
+  const visibleData = sortedData.slice(min, max + 1)
+  
+  // 2. 新しいスケール値の計算
   const askValues = visibleData.map(d => d.ask_total)
   const bidValues = visibleData.map(d => d.bid_total)
+  const priceValues = visibleData.map(d => d.price)
   
   const minAsk = Math.min(...askValues)
   const maxAsk = Math.max(...askValues)
   const minBid = Math.min(...bidValues)
   const maxBid = Math.max(...bidValues)
+  const minPrice = Math.min(...priceValues)
+  const maxPrice = Math.max(...priceValues)
   
   const askRange = maxAsk - minAsk
   const bidRange = maxBid - minBid
   const maxRange = Math.max(askRange, bidRange) || 1
   
-  return { minAsk, maxAsk, minBid, maxBid, maxRange }
-}, [data, visibleRange])
+  // 3. データセットの直接更新（再レンダリングを避ける）
+  const normalizedAskData = sortedData.map(d => {
+    const normalizedValue = ((d.ask_total - minAsk) / maxRange) * 30
+    return 100 - normalizedValue
+  })
+  
+  chart.data.datasets[0].data = normalizedAskData
+  chart.data.datasets[1].data = /* BID計算 */
+  chart.data.datasets[2].data = /* 価格計算 */
+  
+  // 4. Y軸ラベルの動的更新
+  chart.options.scales.y.ticks.callback = function(value) {
+    const numValue = Number(value)
+    if (numValue >= 70 && numValue <= 100) {
+      const actualValue = minAsk + ((100 - numValue) / 30) * maxRange
+      if (actualValue > maxAsk) return ''
+      return Math.round(actualValue).toLocaleString()
+    }
+    // ... BID範囲の処理
+  }
+  
+  // 5. アニメーションなし更新
+  chart.update('none')
+}, [sortedData])
 
-// ズーム・パン時のコールバック
+// ズーム・パン時のコールバック設定
 const chartOptions = {
   plugins: {
     zoom: {
       pan: {
         enabled: true,
         mode: 'x',
-        onPan: ({ chart }) => {
-          const xScale = chart.scales.x
-          const min = Math.max(0, Math.floor(xScale.min))
-          const max = Math.min(data.length - 1, Math.ceil(xScale.max))
-          setVisibleRange({ min, max })
+        onPanComplete: ({ chart }) => {
+          updateDynamicScale(chart)
+          setIsZoomed(true)
         }
       },
       zoom: {
         wheel: { enabled: true, speed: 0.1 },
         mode: 'x',
-        onZoom: ({ chart }) => {
-          const xScale = chart.scales.x
-          const min = Math.max(0, Math.floor(xScale.min))
-          const max = Math.min(data.length - 1, Math.ceil(xScale.max))
-          setVisibleRange({ min, max })
+        onZoomComplete: ({ chart }) => {
+          updateDynamicScale(chart)
+          setIsZoomed(true)
         }
       }
     }

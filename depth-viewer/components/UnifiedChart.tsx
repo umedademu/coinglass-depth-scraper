@@ -15,7 +15,7 @@ import {
   ChartData
 } from 'chart.js'
 import { OrderBookData } from '@/lib/supabase'
-import { useMemo } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 
 // Chart.jsの必要なコンポーネントを登録
 ChartJS.register(
@@ -29,24 +29,132 @@ ChartJS.register(
   Filler
 )
 
+// chartjs-plugin-zoomの動的インポート（SSR対応）
+if (typeof window !== 'undefined') {
+  import('chartjs-plugin-zoom').then((zoomPlugin) => {
+    ChartJS.register(zoomPlugin.default)
+  })
+}
+
 interface UnifiedChartProps {
   data: OrderBookData[]
 }
 
 export default function UnifiedChart({ data }: UnifiedChartProps) {
+  const [isZoomed, setIsZoomed] = useState(false)
+  const chartRef = useRef<any>(null)
+
+  // データを時系列順にソート（メモ化）
+  const sortedData = useMemo(() => {
+    if (data.length === 0) return []
+    return [...data].sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    )
+  }, [data])
+
+  // 動的スケール更新関数（Chart.jsインスタンスを直接操作）
+  const updateDynamicScale = useCallback((chart: any) => {
+    if (!chart || !sortedData.length) return
+
+    // 表示範囲の取得
+    const xScale = chart.scales.x
+    const min = Math.max(0, Math.floor(xScale.min))
+    const max = Math.min(sortedData.length - 1, Math.ceil(xScale.max))
+    const visibleData = sortedData.slice(min, max + 1)
+
+    if (visibleData.length === 0) return
+
+    // 新しいスケール値の計算
+    const askValues = visibleData.map(d => d.ask_total)
+    const bidValues = visibleData.map(d => d.bid_total)
+    const priceValues = visibleData.map(d => d.price)
+
+    const minAsk = Math.min(...askValues)
+    const maxAsk = Math.max(...askValues)
+    const minBid = Math.min(...bidValues)
+    const maxBid = Math.max(...bidValues)
+    const minPrice = Math.min(...priceValues)
+    const maxPrice = Math.max(...priceValues)
+
+    // 共通スケールの計算
+    const askRange = maxAsk - minAsk
+    const bidRange = maxBid - minBid
+    const maxRange = Math.max(askRange, bidRange) || 1
+    const priceRange = maxPrice - minPrice || 1
+
+    // データセットの直接更新（再レンダリングを避ける）
+    const normalizedAskData = sortedData.map(d => {
+      const normalizedValue = ((d.ask_total - minAsk) / maxRange) * 30
+      return 100 - normalizedValue
+    })
+
+    const normalizedBidData = sortedData.map(d => {
+      return ((d.bid_total - minBid) / maxRange) * 30
+    })
+
+    const normalizedPriceData = sortedData.map(d => {
+      return ((d.price - minPrice) / priceRange) * 40 + 30
+    })
+
+    // データを直接更新
+    chart.data.datasets[0].data = normalizedAskData
+    chart.data.datasets[1].data = normalizedBidData
+    chart.data.datasets[2].data = normalizedPriceData
+
+    // Y軸ラベルの動的更新
+    chart.options.scales.y.ticks.callback = function(value: any) {
+      const numValue = Number(value)
+      
+      // 70-100の範囲（売り板） - 反転表示
+      if (numValue >= 70 && numValue <= 100) {
+        const actualValue = minAsk + ((100 - numValue) / 30) * maxRange
+        if (actualValue > maxAsk) return ''
+        return Math.round(actualValue).toLocaleString()
+      }
+      
+      // 0-30の範囲（買い板）
+      if (numValue >= 0 && numValue <= 30) {
+        const actualValue = minBid + (numValue / 30) * maxRange
+        if (actualValue > maxBid) return ''
+        return Math.round(actualValue).toLocaleString()
+      }
+      
+      return ''
+    }
+
+    // 価格Y軸の更新
+    chart.options.scales.y2.ticks.callback = function(value: any) {
+      const numValue = Number(value)
+      
+      // 30-70の範囲（価格）のみ表示
+      if (numValue >= 30 && numValue <= 70) {
+        const actualValue = minPrice + ((numValue - 30) / 40) * priceRange
+        return `$${Math.round(actualValue).toLocaleString()}`
+      }
+      
+      return ''
+    }
+
+    // アニメーションなし更新
+    chart.update('none')
+  }, [sortedData])
+
+  // ズームリセット関数
+  const handleResetZoom = () => {
+    if (chartRef.current) {
+      chartRef.current.resetZoom()
+      setIsZoomed(false)
+    }
+  }
+
   // データの正規化と準備
   const { chartData, chartOptions } = useMemo(() => {
-    if (data.length === 0) {
+    if (sortedData.length === 0) {
       return {
         chartData: { labels: [], datasets: [] },
         chartOptions: {}
       }
     }
-
-    // データを時系列順（古い→新しい）にソート
-    const sortedData = [...data].sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    )
 
     // タイムスタンプを時刻形式に変換
     const timestamps = sortedData.map(d => {
@@ -163,6 +271,27 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
               }
             }
           }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'x',
+            onPanComplete: ({ chart }: any) => {
+              updateDynamicScale(chart)
+              setIsZoomed(true)
+            }
+          },
+          zoom: {
+            wheel: {
+              enabled: true,
+              speed: 0.1
+            },
+            mode: 'x',
+            onZoomComplete: ({ chart }: any) => {
+              updateDynamicScale(chart)
+              setIsZoomed(true)
+            }
+          }
         }
       },
       scales: {
@@ -235,7 +364,7 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
     }
 
     return { chartData, chartOptions }
-  }, [data])
+  }, [sortedData, updateDynamicScale])
 
   return (
     <div style={{
@@ -243,14 +372,42 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
       padding: '1.5rem',
       backgroundColor: '#1e1e1e',
       borderRadius: '8px',
-      height: '850px' // コンテナの高さ（パディング込み）
+      height: '850px', // コンテナの高さ（パディング込み）
+      position: 'relative'
     }}>
+      {/* ズームリセットボタン */}
+      {isZoomed && (
+        <button
+          onClick={handleResetZoom}
+          style={{
+            position: 'absolute',
+            top: '1rem',
+            right: '1rem',
+            padding: '0.5rem 1rem',
+            backgroundColor: '#4B5563',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            zIndex: 10,
+            fontSize: '0.875rem',
+            fontWeight: '500'
+          }}
+        >
+          ズームリセット
+        </button>
+      )}
+      
       <div style={{
         height: '800px', // グラフの高さ800px固定
         position: 'relative'
       }}>
         {data.length > 0 ? (
-          <Line data={chartData} options={chartOptions} />
+          <Line 
+            ref={chartRef}
+            data={chartData} 
+            options={chartOptions} 
+          />
         ) : (
           <div style={{
             display: 'flex',
