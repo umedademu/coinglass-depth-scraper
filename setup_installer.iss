@@ -1,12 +1,12 @@
 [Setup]
 AppName=Coinglass BTC-USDT Order Book Monitor
-AppVersion=1.19
+AppVersion=1.20
 AppPublisher=CoinglassScraper
 DefaultDirName={userappdata}\CoinglassScraper
 DefaultGroupName=CoinglassScraper
 UninstallDisplayIcon={app}\CoinglassScraper.exe
 OutputDir=installer
-OutputBaseFilename=CoinglassScraper_Setup_v1.19
+OutputBaseFilename=CoinglassScraper_Setup_v1.20
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest

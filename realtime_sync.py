@@ -79,7 +79,7 @@ class RealtimeSync:
             return False
             
         tables = [
-            ('order_book_shared', '5分足'),
+            ('order_book_5min', '5分足'),
             ('order_book_15min', '15分足'),
             ('order_book_30min', '30分足'),
             ('order_book_1hour', '1時間足'),

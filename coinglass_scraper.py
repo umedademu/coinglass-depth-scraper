@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -546,7 +546,7 @@ class CoinglassScraper:
 class ScraperGUI:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.18")
+        self.root.title("Coinglass BTC-USDT Order Book Monitor v1.20")
         self.root.geometry("1200x900")  # ウィンドウサイズを拡大
         
         # ウィンドウアイコンを設定
@@ -765,7 +765,7 @@ class ScraperGUI:
             
             
             # グラフ用データを追加
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             self.time_history.append(now)
             self.ask_history.append(full_ask_total)
             self.bid_history.append(full_bid_total)
@@ -1174,7 +1174,7 @@ class ScraperGUI:
                 #     check_thread.start()
             
             # 300日以上前のデータを削除
-            cutoff_date = (datetime.now() - timedelta(days=300)).isoformat()
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=300)).isoformat()
             cursor.execute("""
                 DELETE FROM order_book_history 
                 WHERE timestamp < ?
@@ -1227,7 +1227,7 @@ class ScraperGUI:
             
             # Supabaseテーブル名とローカルテーブル名のマッピング
             table_mapping = {
-                'order_book_shared': 'order_book_5min',
+                'order_book_5min': 'order_book_5min',
                 'order_book_15min': 'order_book_15min',
                 'order_book_30min': 'order_book_30min',
                 'order_book_1hour': 'order_book_1hour',
@@ -1237,7 +1237,7 @@ class ScraperGUI:
             }
             
             timeframe_names = {
-                'order_book_shared': '5分足',
+                'order_book_5min': '5分足',
                 'order_book_15min': '15分足',
                 'order_book_30min': '30分足',
                 'order_book_1hour': '1時間足',
@@ -1327,7 +1327,7 @@ class ScraperGUI:
             
             # Supabaseテーブル名とローカルテーブル名のマッピング
             table_mapping = {
-                'order_book_shared': 'order_book_5min',   # 5分足
+                'order_book_5min': 'order_book_5min',   # 5分足
                 'order_book_15min': 'order_book_15min',    # 15分足
                 'order_book_30min': 'order_book_30min',    # 30分足
                 'order_book_1hour': 'order_book_1hour',    # 1時間足
@@ -1352,8 +1352,8 @@ class ScraperGUI:
                     else:
                         # テーブルが空の場合、デフォルト値を設定
                         # 過去のデータを取得するために現在時刻から適切な期間前を設定
-                        from datetime import datetime, timedelta
-                        default_timestamp = (datetime.now() - timedelta(days=7)).isoformat()
+                        from datetime import datetime, timedelta, timezone
+                        default_timestamp = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
                         timestamps[supabase_table] = default_timestamp
                         self.add_log(f"[{supabase_table}] データなし、デフォルト: {default_timestamp} (from {local_table})", "DEBUG")
                         
@@ -1376,7 +1376,7 @@ class ScraperGUI:
             
             # Supabaseテーブル名からローカルテーブル名へのマッピング
             table_mapping = {
-                'order_book_shared': 'order_book_5min',  # 5分足
+                'order_book_5min': 'order_book_5min',  # 5分足
                 'order_book_15min': 'order_book_15min',   # 15分足
                 'order_book_30min': 'order_book_30min',   # 30分足
                 'order_book_1hour': 'order_book_1hour',   # 1時間足
@@ -1455,7 +1455,7 @@ class ScraperGUI:
                 
                 # テーブル名から時間足名を取得
                 timeframe_names = {
-                    'order_book_shared': '5分足',
+                    'order_book_5min': '5分足',
                     'order_book_15min': '15分足',
                     'order_book_30min': '30分足',
                     'order_book_1hour': '1時間足',

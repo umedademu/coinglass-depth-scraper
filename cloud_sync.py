@@ -355,7 +355,7 @@ class CloudSyncManager:
             }
             
             # 既存データを確認
-            existing = self.client.table('order_book_shared')\
+            existing = self.client.table('order_book_5min')\
                 .select('*')\
                 .eq('timestamp', timestamp)\
                 .eq('group_id', self.group_id)\
@@ -370,7 +370,7 @@ class CloudSyncManager:
                         'bid_total': max(bid_total, existing_data['bid_total']),
                         'price': price
                     }
-                    self.client.table('order_book_shared')\
+                    self.client.table('order_book_5min')\
                         .update(update_data)\
                         .eq('timestamp', timestamp)\
                         .eq('group_id', self.group_id)\
@@ -386,7 +386,7 @@ class CloudSyncManager:
                         self.log_callback(msg, "INFO")
             else:
                 # 新規データとして挿入
-                self.client.table('order_book_shared').insert(data).execute()
+                self.client.table('order_book_5min').insert(data).execute()
                 msg = f"[5分足] ✓ 新規保存: {timestamp} | Ask: {ask_total:.1f} | Bid: {bid_total:.1f} | Price: ${price:,.1f}"
                 self.logger.info(msg)
                 if self.log_callback:
@@ -420,7 +420,7 @@ class CloudSyncManager:
             
             # 各テーブルの最新データをチェック
             tables = [
-                ('order_book_shared', '5分足', 300),  # 5分データは5時間以内が正常
+                ('order_book_5min', '5分足', 300),  # 5分データは5時間以内が正常
                 ('order_book_15min', '15分足', 900),  # 15分データは15時間以内が正常
                 ('order_book_30min', '30分足', 1800),  # 30分データは30時間以内が正常
                 ('order_book_1hour', '1時間足', 3600),  # 1時間データは60時間以内が正常
@@ -539,7 +539,7 @@ class CloudSyncManager:
                 self.log_callback(msg, "INFO")
             
             # 全データを取得（最大10000件まで）
-            result = self.client.table('order_book_shared')\
+            result = self.client.table('order_book_5min')\
                 .select('*')\
                 .eq('group_id', self.group_id)\
                 .order('timestamp')\
@@ -595,7 +595,7 @@ class CloudSyncManager:
                 self.log_callback(msg, "INFO")
             
             # 指定期間のデータを取得
-            result = self.client.table('order_book_shared')\
+            result = self.client.table('order_book_5min')\
                 .select('*')\
                 .eq('group_id', self.group_id)\
                 .gte('timestamp', start_time.strftime('%Y-%m-%d %H:%M:%S'))\
@@ -646,7 +646,7 @@ class CloudSyncManager:
             return {}
         
         tables = [
-            ('order_book_shared', '5分足'),
+            ('order_book_5min', '5分足'),
             ('order_book_15min', '15分足'),
             ('order_book_30min', '30分足'),
             ('order_book_1hour', '1時間足'),
@@ -911,7 +911,7 @@ class CloudSyncManager:
                 
                 # テーブル名から時間足名を取得
                 timeframe_names = {
-                    'order_book_shared': '5分足',
+                    'order_book_5min': '5分足',
                     'order_book_15min': '15分足',
                     'order_book_30min': '30分足',
                     'order_book_1hour': '1時間足',
