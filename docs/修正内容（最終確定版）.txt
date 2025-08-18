@@ -1,0 +1,36 @@
+● 修正内容（最終確定版）
+
+  1. バックアップ
+
+  - ローカルDBをバックアップ
+
+  2. デスクトップアプリのコード修正
+
+  - 時刻取得をdatetime.now()からdatetime.now(timezone.utc)に変更
+  - 5分足の参照先をorder_book_sharedからorder_book_5minに変更
+
+  3. Supabaseの修正
+
+  - order_book_5minテーブルを新規作成
+  - order_book_sharedのデータをorder_book_5minにコピー（そのまま）
+  - order_book_sharedは一切触らない（旧版ユーザー用）
+  - 15分足、30分足、1時間足、2時間足、4時間足、日足の全データに単純に+9時間
+
+  4. ローカルDBの修正
+
+  - 1分足、15分足、30分足、1時間足、2時間足、4時間足、日足の全データに単純に+9時間
+  - 5分足はそのまま（既に正しい）
+
+  5. Webアプリの修正
+
+  - 5分足の参照先をorder_book_sharedからorder_book_5minに変更
+
+  6. リリース前の最終処理
+
+  - order_book_sharedからorder_book_5minへ最新データを再コピー
+
+  ポイント
+
+  - すべて単純に+9時間（時刻の丸めは不要）
+  - 5分足だけ特別扱い（テーブル分離）
+  - 旧版ユーザーへの影響ゼロ
