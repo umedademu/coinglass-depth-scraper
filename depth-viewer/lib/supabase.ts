@@ -16,7 +16,7 @@ export interface OrderBookData {
 }
 
 export const timeframes = [
-  { key: '5min', label: '5分足', table: 'order_book_shared' },
+  { key: '5min', label: '5分足', table: 'order_book_5min' },
   { key: '15min', label: '15分足', table: 'order_book_15min' },
   { key: '30min', label: '30分足', table: 'order_book_30min' },
   { key: '1hour', label: '1時間足', table: 'order_book_1hour' },
