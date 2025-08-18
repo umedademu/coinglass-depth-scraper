@@ -59,8 +59,23 @@ installer_output\CoinglassScraperSetup_1.0.0.exe
 ```
 
 ### デフォルトのチェックボックス状態
-`installer.iss`の[Tasks]セクション：
-- `Flags: checkedonce` - 初回のみチェック
+`installer.iss`の[Tasks]セクション（57-59行目）：
+
+**現在の設定**（デフォルトでチェックなし）：
+```
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startmenuicon"; Description: "スタートメニューにショートカットを作成"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+```
+
+**デフォルトでチェックONにする場合**：
+```
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkednow
+Name: "startmenuicon"; Description: "スタートメニューにショートカットを作成"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkednow
+```
+
+フラグの説明：
+- `Flags: checkednow` - 常にデフォルトでチェックON（推奨）
+- `Flags: checkedonce` - 初回インストール時のみチェックON
 - `Flags: unchecked` - デフォルトでチェックなし
 
 ### 追加ファイルの同梱
