@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { fetchTimeframeData, OrderBookData, TimeframeKey } from '@/lib/supabase'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { fetchTimeframeData, OrderBookData, TimeframeKey, supabase, timeframes } from '@/lib/supabase'
 import { interpolateMissingData, InterpolatedOrderBookData, detectMissingSlots } from '@/lib/dataInterpolation'
 import MarketInfo from '@/components/MarketInfo'
 import TimeframeSelector from '@/components/TimeframeSelector'
@@ -22,12 +22,23 @@ interface CacheEntry {
 // localStorage のキー
 const LOCALSTORAGE_TIMEFRAME_KEY = 'depth-viewer-timeframe'
 
+// 接続状態の型定義
+type ConnectionStatus = 'connected' | 'connecting' | 'disconnected'
+
+// データ最大保持数
+const MAX_DATA_POINTS = 5000
+
 export default function Home() {
   const [loading, setLoading] = useState(true)
   const [timeframeLoading, setTimeframeLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<InterpolatedOrderBookData[]>([])
   const [latestData, setLatestData] = useState<OrderBookData | null>(null)
+  
+  // リアルタイム関連の状態
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
+  const channelRef = useRef<any>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   // localStorageから初期値を取得
   const getInitialTimeframe = (): TimeframeKey => {
@@ -144,6 +155,127 @@ export default function Home() {
     }
   }, [dataCache])
 
+  // リアルタイムデータ処理
+  const handleRealtimeData = useCallback((newData: OrderBookData) => {
+    console.log('📡 リアルタイムデータ受信:', {
+      timestamp: newData.timestamp,
+      price: newData.price,
+      ask: newData.ask_total,
+      bid: newData.bid_total
+    })
+    
+    setData(prevData => {
+      // 新しいデータを追加（InterpolatedOrderBookDataとして）
+      const interpolatedNewData: InterpolatedOrderBookData = {
+        ...newData,
+        isInterpolated: false
+      }
+      
+      let updatedData = [...prevData, interpolatedNewData]
+      
+      // メモリ管理：最大保持数を超えた場合は古いデータを削除
+      if (updatedData.length > MAX_DATA_POINTS) {
+        console.log(`⚠️ データ数が${MAX_DATA_POINTS}件を超えたため、古いデータを削除します`)
+        updatedData = updatedData.slice(updatedData.length - MAX_DATA_POINTS)
+      }
+      
+      return updatedData
+    })
+    
+    // 最新データを更新
+    setLatestData(newData)
+    
+    // キャッシュも更新
+    setDataCache(prev => {
+      const currentCache = prev[selectedTimeframe]
+      if (currentCache) {
+        const interpolatedNewData: InterpolatedOrderBookData = {
+          ...newData,
+          isInterpolated: false
+        }
+        
+        let updatedCacheData = [...currentCache.data, interpolatedNewData]
+        
+        // キャッシュでもメモリ管理
+        if (updatedCacheData.length > MAX_DATA_POINTS) {
+          updatedCacheData = updatedCacheData.slice(updatedCacheData.length - MAX_DATA_POINTS)
+        }
+        
+        return {
+          ...prev,
+          [selectedTimeframe]: {
+            ...currentCache,
+            data: updatedCacheData,
+            timestamp: Date.now()
+          }
+        }
+      }
+      return prev
+    })
+  }, [selectedTimeframe])
+
+  // Realtime購読の設定
+  const setupRealtimeSubscription = useCallback((timeframe: TimeframeKey) => {
+    // 既存のチャンネルをクリーンアップ
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+    
+    // テーブル名を取得
+    const table = timeframes.find(tf => tf.key === timeframe)?.table
+    if (!table) {
+      console.error(`❌ 無効なタイムフレーム: ${timeframe}`)
+      return
+    }
+    
+    console.log(`🔌 WebSocket接続を設定中... (${table})`)
+    setConnectionStatus('connecting')
+    
+    // Realtimeチャンネルを作成
+    const channel = supabase
+      .channel(`${table}-changes`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: table,
+          filter: 'group_id=eq.default-group'
+        },
+        (payload) => {
+          handleRealtimeData(payload.new as OrderBookData)
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 Realtime状態: ${status}`)
+        
+        if (status === 'SUBSCRIBED') {
+          setConnectionStatus('connected')
+          console.log('✅ WebSocket接続が確立されました')
+          
+          // 再接続タイマーをクリア
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current)
+            reconnectTimeoutRef.current = null
+          }
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setConnectionStatus('disconnected')
+          console.log('❌ WebSocket接続が切断されました')
+          
+          // 自動再接続（5秒後）
+          if (!reconnectTimeoutRef.current) {
+            reconnectTimeoutRef.current = setTimeout(() => {
+              console.log('🔄 再接続を試みています...')
+              setupRealtimeSubscription(timeframe)
+            }, 5000)
+          }
+        }
+      })
+    
+    channelRef.current = channel
+  }, [handleRealtimeData])
+
   // タイムフレーム変更時の処理
   const handleTimeframeChange = useCallback((timeframe: TimeframeKey) => {
     console.log(`📊 タイムフレーム変更: ${selectedTimeframe} → ${timeframe}`)
@@ -156,16 +288,22 @@ export default function Home() {
     
     // データを読み込み
     loadTimeframeData(timeframe)
-  }, [selectedTimeframe, loadTimeframeData])
+    
+    // Realtime購読を再設定
+    setupRealtimeSubscription(timeframe)
+  }, [selectedTimeframe, loadTimeframeData, setupRealtimeSubscription])
 
   // 初期データ読み込み
   useEffect(() => {
     async function loadInitialData() {
-      console.log('=== 第5段階：タイムフレーム切り替え（遅延読み込み版） ===')
+      console.log('=== 第6段階：リアルタイム更新 ===')
       
       try {
         await loadTimeframeData(selectedTimeframe)
         setLoading(false)
+        
+        // Realtime購読を開始
+        setupRealtimeSubscription(selectedTimeframe)
       } catch (err) {
         console.error('❌ 初期データ取得エラー:', err)
         setError(err instanceof Error ? err.message : 'データの取得に失敗しました')
@@ -174,6 +312,23 @@ export default function Home() {
     }
 
     loadInitialData()
+  }, [])
+  
+  // クリーンアップ処理
+  useEffect(() => {
+    return () => {
+      // チャンネルをクリーンアップ
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+      
+      // 再接続タイマーをクリア
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+    }
   }, [])
 
   if (loading) {
@@ -230,14 +385,45 @@ export default function Home() {
     <main style={{ 
       padding: '2rem',
       minHeight: '100vh',
-      backgroundColor: '#0a0a0a'
+      backgroundColor: '#0a0a0a',
+      position: 'relative'
     }}>
+      {/* 接続状態インジケーター（右上） */}
+      <div style={{
+        position: 'fixed',
+        top: '1rem',
+        right: '1rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        backgroundColor: 'rgba(30, 30, 30, 0.9)',
+        padding: '0.5rem 1rem',
+        borderRadius: '8px',
+        zIndex: 1000
+      }}>
+        <div style={{
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          backgroundColor: connectionStatus === 'connected' ? '#4ade80' :
+                          connectionStatus === 'connecting' ? '#facc15' : '#f87171'
+        }} />
+        <span style={{
+          fontSize: '0.9rem',
+          color: connectionStatus === 'connected' ? '#4ade80' :
+                 connectionStatus === 'connecting' ? '#facc15' : '#f87171'
+        }}>
+          {connectionStatus === 'connected' ? '接続中' :
+           connectionStatus === 'connecting' ? '接続中...' : '切断'}
+        </span>
+      </div>
+      
       <h1 style={{ 
         marginBottom: '2rem',
         fontSize: '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第5段階：タイムフレーム切り替え
+        Depth Viewer - 第6段階：リアルタイム更新
       </h1>
       
       {/* UI配置の最適化: 市場情報 → タイムフレーム選択 → グラフ の順序 */}
@@ -277,6 +463,13 @@ export default function Home() {
             <div>🖱️ マウスホイール: ズーム | ドラッグ: パン（移動）</div>
           </>
         )}
+        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #333' }}>
+          <div>📡 リアルタイム更新: {connectionStatus === 'connected' ? '有効' : connectionStatus === 'connecting' ? '接続中...' : '無効'}</div>
+          {latestData && (
+            <div>🔄 最終更新: {new Date(latestData.timestamp).toLocaleString('ja-JP')}</div>
+          )}
+          <div>💾 メモリ管理: 最大{MAX_DATA_POINTS.toLocaleString()}件保持</div>
+        </div>
       </div>
     </main>
   )
