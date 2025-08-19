@@ -37,6 +37,9 @@ if (typeof window !== 'undefined') {
   })
 }
 
+// 初期表示件数（TradingView/MT5準拠）
+const INITIAL_DISPLAY_COUNT = 250
+
 interface UnifiedChartProps {
   data: InterpolatedOrderBookData[]
   onLoadOlderData?: () => Promise<InterpolatedOrderBookData[]>
@@ -473,6 +476,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
       },
       scales: {
         x: {
+          // 初期表示を最新250件に制限（TradingView/MT5準拠）
+          min: Math.max(0, sortedData.length - INITIAL_DISPLAY_COUNT),  // 最新250件の開始位置
+          max: sortedData.length - 1,                                    // 最後まで
           grid: {
             color: 'rgba(255, 255, 255, 0.1)'
           },
