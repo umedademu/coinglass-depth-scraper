@@ -1,3 +1,4 @@
+import React from 'react'
 import { timeframes, TimeframeKey } from '@/lib/supabase'
 
 interface TimeframeSelectorProps {
@@ -6,18 +7,13 @@ interface TimeframeSelectorProps {
   loading?: boolean
 }
 
-export default function TimeframeSelector({ 
+const TimeframeSelector = React.memo(function TimeframeSelector({ 
   selectedTimeframe, 
   onTimeframeChange,
   loading = false 
 }: TimeframeSelectorProps) {
   return (
-    <div style={{
-      padding: '1rem',
-      backgroundColor: '#2a2a2a',
-      borderRadius: '8px',
-      marginBottom: '1rem'
-    }}>
+    <div>
       <div style={{
         display: 'flex',
         gap: '0.5rem',
@@ -59,4 +55,6 @@ export default function TimeframeSelector({
       )}
     </div>
   )
-}
+})
+
+export default TimeframeSelector

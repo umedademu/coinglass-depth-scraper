@@ -6,6 +6,8 @@ import { interpolateMissingData, InterpolatedOrderBookData, detectMissingSlots }
 import MarketInfo from '@/components/MarketInfo'
 import TimeframeSelector from '@/components/TimeframeSelector'
 import UnifiedChart, { UnifiedChartRef } from '@/components/UnifiedChart'
+import LoadingScreen from '@/components/LoadingScreen'
+import ErrorScreen from '@/components/ErrorScreen'
 
 // データキャッシュの型定義
 interface CacheEntry {
@@ -37,6 +39,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<InterpolatedOrderBookData[]>([])
   const [latestData, setLatestData] = useState<OrderBookData | null>(null)
+  const [hoveredData, setHoveredData] = useState<InterpolatedOrderBookData | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
   
   // リアルタイム関連の状態
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
@@ -44,18 +48,26 @@ export default function Home() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const chartRef = useRef<UnifiedChartRef>(null) // Chartコンポーネントへの参照
   
-  // localStorageから初期値を取得
-  const getInitialTimeframe = (): TimeframeKey => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(LOCALSTORAGE_TIMEFRAME_KEY)
-      if (saved && ['5min', '15min', '30min', '1hour', '2hour', '4hour', '1day'].includes(saved)) {
-        return saved as TimeframeKey
-      }
-    }
-    return '1hour' // デフォルト
-  }
+  // localStorageから初期値を取得（useEffect内で実行）
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeKey>('1hour')
   
-  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeKey>(getInitialTimeframe)
+  // レスポンシブデザインの対応
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    
+    // localStorageから設定を復元
+    const saved = localStorage.getItem(LOCALSTORAGE_TIMEFRAME_KEY)
+    if (saved && ['5min', '15min', '30min', '1hour', '2hour', '4hour', '1day'].includes(saved)) {
+      setSelectedTimeframe(saved as TimeframeKey)
+    }
+    
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
   
   // データキャッシュ（メモリ内）
   const [dataCache, setDataCache] = useState<Record<TimeframeKey, CacheEntry | null>>({
@@ -451,52 +463,24 @@ export default function Home() {
   }, [])
 
   if (loading) {
-    return (
-      <main style={{ 
-        padding: '2rem',
-        minHeight: '100vh',
-        backgroundColor: '#0a0a0a'
-      }}>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '50vh'
-        }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>
-            ⏳ データを読み込み中...
-          </div>
-          <div style={{ color: '#999' }}>
-            1時間足データ（最新1000件）を取得しています
-          </div>
-        </div>
-      </main>
-    )
+    return <LoadingScreen />
   }
 
   if (error) {
     return (
-      <main style={{ 
-        padding: '2rem',
-        minHeight: '100vh',
-        backgroundColor: '#0a0a0a'
-      }}>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '50vh'
-        }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#f87171' }}>
-            ❌ エラーが発生しました
-          </div>
-          <div style={{ color: '#999' }}>
-            {error}
-          </div>
-        </div>
-      </main>
+      <ErrorScreen 
+        error={error}
+        onRetry={() => {
+          setError(null)
+          setLoading(true)
+          loadTimeframeData(selectedTimeframe).then(() => {
+            setLoading(false)
+          }).catch(err => {
+            setError(err instanceof Error ? err.message : 'データの取得に失敗しました')
+            setLoading(false)
+          })
+        }}
+      />
     )
   }
 
@@ -539,30 +523,49 @@ export default function Home() {
       
       <h1 style={{ 
         marginBottom: '2rem',
-        fontSize: '2rem',
+        fontSize: isMobile ? '1.5rem' : '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第7段階：無限スクロール（動的データ取得）
+        Depth Viewer
       </h1>
       
-      {/* UI配置の最適化: 市場情報 → タイムフレーム選択 → グラフ の順序 */}
+      {/* UI配置の最適化: デスクトップは横並び、モバイルは縦積み */}
+      <div style={{
+        display: isMobile ? 'block' : 'flex',
+        gap: isMobile ? '0' : '1rem',
+        alignItems: 'center',
+        marginBottom: '1rem',
+        backgroundColor: '#2a2a2a',
+        borderRadius: '8px',
+        padding: '1rem'
+      }}>
+        {/* タイムフレーム選択（左側/上） */}
+        <TimeframeSelector 
+          selectedTimeframe={selectedTimeframe}
+          onTimeframeChange={handleTimeframeChange}
+          loading={timeframeLoading}
+        />
+        
+        {/* 市場情報（右側/下、コンパクトモード） */}
+        <div style={{
+          flex: isMobile ? 'none' : '1 1 auto'
+        }}>
+          <MarketInfo 
+            latestData={latestData}
+            hoveredData={hoveredData}
+            compact={!isMobile}
+          />
+        </div>
+      </div>
       
-      {/* 市場情報の表示（最上部） */}
-      <MarketInfo latestData={latestData} />
-      
-      {/* タイムフレーム選択（その下） */}
-      <TimeframeSelector 
-        selectedTimeframe={selectedTimeframe}
-        onTimeframeChange={handleTimeframeChange}
-        loading={timeframeLoading}
-      />
-      
-      {/* 統合グラフの表示（その下） */}
+      {/* 統合グラフの表示 */}
       <UnifiedChart 
         ref={chartRef} 
         data={data} 
         onLoadOlderData={loadOlderData}
         isLoadingMore={dataCache[selectedTimeframe]?.isLoadingMore || false}
+        onHoverData={setHoveredData}
+        isMobile={isMobile}
       />
       
       {/* データ統計情報 */}

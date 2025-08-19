@@ -1,11 +1,17 @@
+import React from 'react'
 import { OrderBookData } from '@/lib/supabase'
+import { InterpolatedOrderBookData } from '@/lib/dataInterpolation'
 
 interface MarketInfoProps {
   latestData: OrderBookData | null
+  hoveredData?: InterpolatedOrderBookData | null
+  compact?: boolean
 }
 
-export default function MarketInfo({ latestData }: MarketInfoProps) {
-  if (!latestData) {
+const MarketInfo = React.memo(function MarketInfo({ latestData, hoveredData, compact = false }: MarketInfoProps) {
+  const displayData = hoveredData || latestData
+  
+  if (!displayData) {
     return (
       <div style={{
         padding: '1.5rem',
@@ -18,19 +24,69 @@ export default function MarketInfo({ latestData }: MarketInfoProps) {
     )
   }
 
-  const ratio = latestData.bid_total / latestData.ask_total
+  const ratio = displayData.bid_total / displayData.ask_total
   const formatDate = (timestamp: string) => {
     const date = new Date(timestamp)
-    return date.toLocaleString('ja-JP', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
+    const year = (date.getFullYear() % 100).toString().padStart(2, '0')
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const day = date.getDate().toString().padStart(2, '0')
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    return `${year}/${month}/${day} ${hours}:${minutes}`
   }
 
+  // コンパクトモード
+  if (compact) {
+    return (
+      <div style={{
+        display: 'flex',
+        gap: '1.5rem',
+        alignItems: 'center',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', fontSize: '0.9rem' }}>価格:</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: '600', color: '#fff' }}>
+            ${displayData.price.toLocaleString()}
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', fontSize: '0.9rem' }}>売り:</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: '600', color: '#f87171' }}>
+            {displayData.ask_total.toLocaleString()}
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', fontSize: '0.9rem' }}>買い:</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: '600', color: '#4ade80' }}>
+            {displayData.bid_total.toLocaleString()}
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', fontSize: '0.9rem' }}>比率:</span>
+          <span style={{ 
+            fontSize: '1.1rem', 
+            fontWeight: '600', 
+            color: ratio > 1 ? '#4ade80' : '#f87171' 
+          }}>
+            {ratio.toFixed(2)}
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', fontSize: '0.9rem' }}>日時:</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: '600', color: '#fff' }}>
+            {formatDate(displayData.timestamp)}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  // 通常モード
   return (
     <div style={{
       padding: '1.5rem',
@@ -50,7 +106,7 @@ export default function MarketInfo({ latestData }: MarketInfoProps) {
             最新価格
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' }}>
-            ${latestData.price.toLocaleString()}
+            ${displayData.price.toLocaleString()}
           </div>
         </div>
 
@@ -59,7 +115,7 @@ export default function MarketInfo({ latestData }: MarketInfoProps) {
             売り板総量
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#f87171' }}>
-            {latestData.ask_total.toLocaleString()} BTC
+            {displayData.ask_total.toLocaleString()} BTC
           </div>
         </div>
 
@@ -68,7 +124,7 @@ export default function MarketInfo({ latestData }: MarketInfoProps) {
             買い板総量
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#4ade80' }}>
-            {latestData.bid_total.toLocaleString()} BTC
+            {displayData.bid_total.toLocaleString()} BTC
           </div>
         </div>
 
@@ -93,8 +149,10 @@ export default function MarketInfo({ latestData }: MarketInfoProps) {
         color: '#999',
         fontSize: '0.9rem'
       }}>
-        最終更新: {formatDate(latestData.timestamp)}
+        日時: {formatDate(displayData.timestamp)}
       </div>
     </div>
   )
-}
+})
+
+export default MarketInfo

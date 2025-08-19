@@ -595,22 +595,248 @@ Supabase RealtimeでWebSocket接続し、データ更新時に自動的にグラ
 
 ---
 
-### 第8段階：UI/UX最終調整 🎯難易度: 40/100
+### 第8段階：UI/UX最終調整 ✅完了
 
 #### 目標
 ユーザビリティを向上させ、プロフェッショナルな見た目に最終調整する。
 
+#### 重要な設計判断
+- **X軸の`type: 'category'`を使用しない理由**
+  - 第7段階の無限スクロール機能との互換性問題
+  - カテゴリー軸では`xScale.min <= 0`による左端到達判定が機能しない
+  - 数値軸のままで`autoSkip: true`と`maxTicksLimit`によりラベル表示を最適化
+
 #### タスク
-- ローディング画面の実装
-- エラー画面の実装（データ取得失敗時）
-- レスポンシブデザインの調整
-- スマートフォン用の縦画面対応
-- タブレット用の最適化
-- **インタラクション改善**
-  - 線ベースの当たり判定（Chart.js interaction mode: 'index', intersect: false）
-  - ツールチップの改善（実データ値の表示）
-  - X軸に日付変更点（0:00）で日付表示を追加
-- パフォーマンス最適化
+- **ローディング画面の実装**
+  ```tsx
+  // components/LoadingScreen.tsx
+  export default function LoadingScreen() {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: '#0a0a0a',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        {/* スピナー */}
+        <div style={{
+          width: '50px',
+          height: '50px',
+          border: '3px solid #333',
+          borderTop: '3px solid #ff9500',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }} />
+        <h2>データを読み込み中...</h2>
+        <p>BTC-USDT板情報を取得しています</p>
+      </div>
+    )
+  }
+  ```
+
+- **エラー画面の実装**
+  ```tsx
+  // components/ErrorScreen.tsx
+  interface ErrorScreenProps {
+    error: Error | string
+    onRetry?: () => void
+  }
+  
+  export default function ErrorScreen({ error, onRetry }: ErrorScreenProps) {
+    // エラーアイコン、メッセージ、トラブルシューティングヒント
+    // 再試行ボタンの実装
+  }
+  ```
+
+- **UI配置の最適化**
+  ```tsx
+  // app/page.tsx - レスポンシブレイアウト
+  <div style={{
+    display: isMobile ? 'block' : 'flex',
+    gap: isMobile ? '0' : '1rem',
+    alignItems: 'center',
+    backgroundColor: '#2a2a2a',
+    borderRadius: '8px',
+    padding: '1rem'
+  }}>
+    <TimeframeSelector {...props} />
+    <div style={{ flex: isMobile ? 'none' : '1 1 auto' }}>
+      <MarketInfo 
+        latestData={latestData}
+        hoveredData={hoveredData}
+        compact={!isMobile}
+      />
+    </div>
+  </div>
+  ```
+
+- **MarketInfoコンポーネントの拡張**
+  ```tsx
+  interface MarketInfoProps {
+    latestData: OrderBookData | null
+    hoveredData?: InterpolatedOrderBookData | null
+    compact?: boolean
+  }
+  
+  const MarketInfo = React.memo(function MarketInfo({ 
+    latestData, 
+    hoveredData, 
+    compact = false 
+  }: MarketInfoProps) {
+    const displayData = hoveredData || latestData
+    
+    // コンパクトモード（デスクトップ用）
+    if (compact) {
+      return (
+        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+          <div>価格: ${displayData.price.toLocaleString()}</div>
+          <div>売り: {displayData.ask_total.toLocaleString()}</div>
+          <div>買い: {displayData.bid_total.toLocaleString()}</div>
+          <div>比率: {ratio.toFixed(2)}</div>
+          <div>日時: {formatDate(displayData.timestamp)}</div>
+        </div>
+      )
+    }
+    // 通常モード（モバイル用）
+    // ...
+  })
+  ```
+
+- **レスポンシブデザインの実装**
+  ```tsx
+  // app/page.tsx
+  const [isMobile, setIsMobile] = useState(false)
+  
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+  ```
+
+- **縦線カーソル（crosshairPlugin）の実装**
+  ```tsx
+  // components/UnifiedChart.tsx
+  const crosshairPlugin = useMemo(() => ({
+    id: 'crosshair',
+    afterDraw: (chart: any) => {
+      if (chart.tooltip?._active && chart.tooltip._active.length) {
+        const activePoint = chart.tooltip._active[0]
+        const ctx = chart.ctx
+        const x = activePoint.element.x
+        const topY = chart.scales.y.top
+        const bottomY = chart.scales.y.bottom
+        
+        ctx.save()
+        ctx.beginPath()
+        ctx.moveTo(x, topY)
+        ctx.lineTo(x, bottomY)
+        ctx.lineWidth = 1
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+        ctx.setLineDash([3, 3])
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+  }), [])
+  
+  // Lineコンポーネントに適用
+  <Line 
+    ref={chartRef}
+    data={chartData} 
+    options={chartOptions}
+    plugins={[crosshairPlugin]}
+  />
+  ```
+
+- **Chart.jsツールチップ無効化とホバーデータ連携**
+  ```javascript
+  // Chart.jsオプション
+  plugins: {
+    tooltip: {
+      enabled: false  // ツールチップを完全に無効化
+    }
+  },
+  interaction: {
+    mode: 'index',
+    intersect: false
+  },
+  onHover: (event: any, activeElements: any) => {
+    if (onHoverData) {
+      if (activeElements.length > 0) {
+        const dataIndex = activeElements[0].index
+        onHoverData(sortedData[dataIndex])
+      } else {
+        onHoverData(null)
+      }
+    }
+  }
+  ```
+
+- **X軸ラベルの最適化（type: 'category'なし）**
+  ```javascript
+  scales: {
+    x: {
+      // type: 'category'を削除 - 無限スクロール機能との互換性のため
+      min: Math.max(0, sortedData.length - INITIAL_DISPLAY_COUNT),
+      max: sortedData.length - 1,
+      ticks: {
+        color: '#999',
+        maxRotation: 45,
+        minRotation: 45,
+        autoSkip: true,  // ラベルを自動的に間引く
+        maxTicksLimit: isMobile ? 10 : 20
+      }
+    }
+  }
+  
+  // タイムスタンプのフォーマット
+  const timestamps = sortedData.map(d => {
+    const date = new Date(d.timestamp)
+    const hours = date.getHours().toString().padStart(2, '0')
+    const minutes = date.getMinutes().toString().padStart(2, '0')
+    
+    // 0:00の場合は日付のみ表示
+    if (hours === '00' && minutes === '00') {
+      return date.getDate().toString()
+    }
+    return `${hours}:${minutes}`
+  })
+  ```
+
+- **Next.js最適化（ハイドレーションエラー防止）**
+  ```tsx
+  // localStorage読み込みをuseEffect内で実行
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeKey>('1hour')
+  
+  useEffect(() => {
+    // クライアントサイドでのみ実行
+    const saved = localStorage.getItem(LOCALSTORAGE_TIMEFRAME_KEY)
+    if (saved && timeframes.some(tf => tf.key === saved)) {
+      setSelectedTimeframe(saved as TimeframeKey)
+    }
+  }, [])
+  ```
+
+- **パフォーマンス最適化（React.memo）**
+  ```tsx
+  // 各コンポーネントをメモ化
+  const MarketInfo = React.memo(function MarketInfo({...}: Props) {
+    // ...
+  })
+  
+  const TimeframeSelector = React.memo(function TimeframeSelector({...}: Props) {
+    // ...
+  })
+  
+  export default MarketInfo  // 最後にexport
+  ```
 
 #### 確認項目
 ```
@@ -619,30 +845,52 @@ Supabase RealtimeでWebSocket接続し、データ更新時に自動的にグラ
 
 【デスクトップ】
 1. http://localhost:3000 にアクセス
-2. 初回ロード時にローディング画面が表示される
-3. 全体的にプロフェッショナルな見た目
+2. 初回ロード時にプロフェッショナルなローディング画面が表示される
+3. 上部に以下のレイアウトで表示される：
+   - 時間足ボタンと市場情報が同一行の灰色背景内に配置
+   - 左側：時間足ボタン（5分足〜日足）
+   - 右側：市場情報（価格、売り、買い、比率、日時）が横並び
+4. 市場情報がコンパクトに表示される：
+   - 価格: $112,951 売り: 7,440 買い: 14,279 比率: 1.92 日時: 25/08/20 04:00
+   - マウスホバー時に値が自動的に更新される
+5. チャート上にマウスを移動すると：
+   - 縦の破線カーソルが表示される（時間軸の位置を示す）
+   - Chart.jsのツールチップは表示されない（無効化済み）
+   - 上部の市場情報がホバー位置のデータに更新される
+6. X軸ラベルが正しく表示される：
+   - グラフをパン（ドラッグ）するとX軸ラベルも連動
+   - ラベルが自動的に間引かれて見やすく表示
+   - 0:00の時刻には日付のみ（例：「17」）
+   - その他の時刻は時分のみ（例：「14:30」）
 
-【インタラクション改善】
-4. グラフ上でマウスを横に動かすと縦軸全体でデータが選択される
-5. グラフのX軸をポイントしなくても、その時刻のデータが表示される
-6. ツールチップではなく、画面上部のヘッダーに情報が表示される
-7. X軸の0:00の位置に日付（例：01/19）が表示される
+【無限スクロール（第7段階機能の維持）】
+7. グラフを左にドラッグして左端まで移動
+8. 「過去データを取得中...」が表示される
+9. 古いデータが追加され、スクロール位置が維持される
+   - 注意：上位足では既に全データ取得済みの場合があります
+
+【レスポンシブ】
+10. ブラウザ幅を768px未満に縮小すると：
+    - 時間足ボタンと市場情報が縦積み表示
+    - 市場情報が通常モード（グリッド表示）に切り替わる
+11. 768px以上に拡大すると横並びに戻る
 
 【スマートフォン】
-8. スマホでアクセス（または開発者ツールでモバイル表示）
-9. グラフが画面幅に収まる
-10. テキストが読みやすいサイズ
-11. スクロールがスムーズ
-12. タップ操作が快適
+12. スマホでアクセス（または開発者ツールでモバイル表示）
+13. 時間足ボタンと市場情報が縦積みで表示
+14. グラフが画面幅に収まる
+15. X軸ラベルが10個以内に制限される
 
 【エラー処理】
-13. Supabase接続を切断（環境変数を一時的に変更）
-14. エラー画面が表示される
-15. 「再試行」ボタンが機能する
+16. Supabase接続エラー時にエラー画面が表示される
+    - エラーアイコン、メッセージ、トラブルシューティングヒント
+    - 「再試行」ボタンが機能する
 
 【パフォーマンス】
-16. Lighthouseスコア90以上
-17. 初回表示3秒以内
+17. ページリロード後も選択した時間足が保持される（localStorage）
+18. 初回表示3秒以内
+19. React.memoによる不要な再レンダリング防止
+20. ホバー操作が滑らか（60fps維持）
 
 全ての項目が確認できればOKです！」
 ```
@@ -1100,39 +1348,100 @@ const chartOptions = {
   }
 };
 
-// ヘッダー表示コンポーネント
-<div className="header-info">
-  <span>時刻: {hoveredData?.time || latestData.time}</span>
-  <span>売り板: {hoveredData?.ask || latestData.ask}</span>
-  <span>買い板: {hoveredData?.bid || latestData.bid}</span>
-  <span>価格: {hoveredData?.price || latestData.price}</span>
+// 縦線カーソルプラグインの実装
+const crosshairPlugin = useMemo(() => ({
+  id: 'crosshair',
+  afterDraw: (chart: any) => {
+    if (chart.tooltip?._active && chart.tooltip._active.length) {
+      const activePoint = chart.tooltip._active[0]
+      const ctx = chart.ctx
+      const x = activePoint.element.x
+      const topY = chart.scales.y.top
+      const bottomY = chart.scales.y.bottom
+
+      // 保存現在の描画状態
+      ctx.save()
+      
+      // 縦線の描画のみ（時間軸位置を示す）
+      ctx.beginPath()
+      ctx.moveTo(x, topY)
+      ctx.lineTo(x, bottomY)
+      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+      ctx.setLineDash([3, 3])
+      ctx.stroke()
+      
+      // 描画状態を復元
+      ctx.restore()
+    }
+  }
+}), [])
+
+// チャートコンポーネントにプラグインを適用
+<Line 
+  ref={chartRef}
+  data={chartData} 
+  options={chartOptions}
+  plugins={[crosshairPlugin]}  // カスタムプラグインの追加
+/>
+
+// MarketInfoコンポーネントで日時を含む情報表示
+<MarketInfo 
+  latestData={latestData} 
+  hoveredData={hoveredData}
+  compact={!isMobile}
+/>
+
+// MarketInfo内での日時表示実装
+const formatDate = (timestamp: string) => {
+  const date = new Date(timestamp);
+  const year = (date.getFullYear() % 100).toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
+};
+
+// コンパクトモードでの表示（デスクトップ）
+<div>
+  <span>価格: ${displayData.price}</span>
+  <span>売り: {displayData.ask_total}</span>
+  <span>買い: {displayData.bid_total}</span>
+  <span>比率: {ratio.toFixed(2)}</span>
+  <span>日時: {formatDate(displayData.timestamp)}</span>  // 例：24/12/19 14:30
 </div>
 
-// 3. X軸に日付表示を追加
+// 3. X軸ラベルの正しい実装（パン操作対応）
 const chartOptions = {
   scales: {
     x: {
+      type: 'category',  // カテゴリー軸として扱う
       ticks: {
-        callback: function(value, index) {
-          const timestamp = timestamps[index];
-          const time = timestamp.split('T')[1].substring(0, 5);
-          
-          // 0:00の場合は日付も表示
-          if (time === '00:00') {
-            const date = timestamp.split('T')[0];
-            const [year, month, day] = date.split('-');
-            return `${month}/${day}`;
-          }
-          
-          return time;
-        },
-        autoSkip: false,
+        color: '#999',
         maxRotation: 45,
-        minRotation: 45
+        minRotation: 45,
+        autoSkip: true,  // 重要：自動的にラベルを間引く
+        maxTicksLimit: isMobile ? 10 : 20  // 表示する最大ラベル数
       }
     }
   }
 };
+
+// timestamps配列の生成時に日付表示を考慮
+const timestamps = sortedData.map(d => {
+  const date = new Date(d.timestamp);
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  
+  // 0:00の場合は日付のみ表示（日のみ）
+  if (hours === '00' && minutes === '00') {
+    const day = date.getDate().toString();
+    return day;  // 例：「17」
+  }
+  
+  return `${hours}:${minutes}`;
+});
 ```
 
 ### リアルタイム更新実装（ズーム状態維持版）

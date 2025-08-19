@@ -44,6 +44,8 @@ interface UnifiedChartProps {
   data: InterpolatedOrderBookData[]
   onLoadOlderData?: () => Promise<InterpolatedOrderBookData[]>
   isLoadingMore?: boolean
+  onHoverData?: (data: InterpolatedOrderBookData | null) => void
+  isMobile?: boolean
 }
 
 // 外部から操作可能なメソッドの型定義
@@ -52,7 +54,7 @@ export interface UnifiedChartRef {
   getChartInstance: () => any
 }
 
-const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onLoadOlderData, isLoadingMore = false }, ref) => {
+const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onLoadOlderData, isLoadingMore = false, onHoverData, isMobile = false }, ref) => {
   const [isZoomed, setIsZoomed] = useState(false)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const [isPrefetching, setIsPrefetching] = useState(false)
@@ -69,6 +71,35 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
     internalDataRef.current = sorted // 内部参照を更新
     return sorted
   }, [data])
+  
+  // 縦線カーソルプラグインの実装
+  const crosshairPlugin = useMemo(() => ({
+    id: 'crosshair',
+    afterDraw: (chart: any) => {
+      if (chart.tooltip?._active && chart.tooltip._active.length) {
+        const activePoint = chart.tooltip._active[0]
+        const ctx = chart.ctx
+        const x = activePoint.element.x
+        const topY = chart.scales.y.top
+        const bottomY = chart.scales.y.bottom
+
+        // 保存現在の描画状態
+        ctx.save()
+        
+        // 縦線の描画のみ（時間軸位置を示す）
+        ctx.beginPath()
+        ctx.moveTo(x, topY)
+        ctx.lineTo(x, bottomY)
+        ctx.lineWidth = 1
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+        ctx.setLineDash([3, 3])
+        ctx.stroke()
+        
+        // 描画状態を復元
+        ctx.restore()
+      }
+    }
+  }), [])
 
   // 動的スケール更新関数（Chart.jsインスタンスを直接操作）
   const updateDynamicScale = useCallback((chart: any) => {
@@ -257,14 +288,19 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
       }
     }
 
-    // タイムスタンプを時刻形式に変換
+    // タイムスタンプを時刻形式に変換（0:00の場合は日付のみ表示）
     const timestamps = sortedData.map(d => {
       const date = new Date(d.timestamp)
-      return date.toLocaleTimeString('ja-JP', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      })
+      const hours = date.getHours().toString().padStart(2, '0')
+      const minutes = date.getMinutes().toString().padStart(2, '0')
+      
+      // 0:00の場合は日付のみ表示（日のみ）
+      if (hours === '00' && minutes === '00') {
+        const day = date.getDate().toString()
+        return day  // 例：「17」
+      }
+      
+      return `${hours}:${minutes}`
     })
 
     // 最小値・最大値の計算（共通スケール用）
@@ -355,44 +391,7 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           display: false // 凡例を非表示
         },
         tooltip: {
-          mode: 'index',
-          intersect: false,
-          callbacks: {
-            label: function(context) {
-              const datasetIndex = context.datasetIndex
-              const dataIndex = context.dataIndex
-              const rawData = sortedData[dataIndex]
-              
-              let label = ''
-              
-              if (datasetIndex === 0) { // 売り板
-                label = `売り板: ${rawData.ask_total.toLocaleString()} BTC`
-              } else if (datasetIndex === 1) { // 買い板
-                label = `買い板: ${rawData.bid_total.toLocaleString()} BTC`
-              } else { // 価格
-                label = `価格: $${rawData.price.toLocaleString()}`
-              }
-              
-              // 補間データの識別表示
-              if (rawData.isInterpolated) {
-                label += ' (データ欠損・補間値)'
-              }
-              
-              return label
-            },
-            afterBody: function(tooltipItems) {
-              if (tooltipItems.length > 0) {
-                const dataIndex = tooltipItems[0].dataIndex
-                const rawData = sortedData[dataIndex]
-                
-                // 補間データの場合、説明を追加
-                if (rawData.isInterpolated) {
-                  return ['', '※ 前後の値から線形補間で推定']
-                }
-              }
-              return []
-            }
-          }
+          enabled: false  // ツールチップを完全に無効化
         },
         zoom: {
           pan: {
@@ -474,8 +473,23 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           }
         }
       },
+      interaction: {
+        mode: 'index',        // 縦軸全体が当たり判定
+        intersect: false      // ポイント上でなくてもOK
+      },
+      onHover: (event: any, activeElements: any) => {
+        if (onHoverData) {
+          if (activeElements.length > 0) {
+            const dataIndex = activeElements[0].index
+            onHoverData(sortedData[dataIndex])
+          } else {
+            onHoverData(null)
+          }
+        }
+      },
       scales: {
         x: {
+          // type: 'category'を削除 - 無限スクロール機能との互換性のため
           // 初期表示を最新250件に制限（TradingView/MT5準拠）
           min: Math.max(0, sortedData.length - INITIAL_DISPLAY_COUNT),  // 最新250件の開始位置
           max: sortedData.length - 1,                                    // 最後まで
@@ -485,7 +499,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           ticks: {
             color: '#999',
             maxRotation: 45,
-            minRotation: 45
+            minRotation: 45,
+            autoSkip: true,  // 重要：自動的にラベルを間引く
+            maxTicksLimit: isMobile ? 10 : 20  // 表示する最大ラベル数
           }
         },
         y: { // 左側Y軸（ASK/BID用）
@@ -641,7 +657,8 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           <Line 
             ref={chartRef}
             data={chartData} 
-            options={chartOptions} 
+            options={chartOptions}
+            plugins={[crosshairPlugin]}
           />
         ) : (
           <div style={{
