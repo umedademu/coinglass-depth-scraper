@@ -15,6 +15,7 @@ import {
   ChartData
 } from 'chart.js'
 import { OrderBookData } from '@/lib/supabase'
+import { InterpolatedOrderBookData } from '@/lib/dataInterpolation'
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 
 // Chart.jsの必要なコンポーネントを登録
@@ -37,7 +38,7 @@ if (typeof window !== 'undefined') {
 }
 
 interface UnifiedChartProps {
-  data: OrderBookData[]
+  data: InterpolatedOrderBookData[]
 }
 
 export default function UnifiedChart({ data }: UnifiedChartProps) {
@@ -262,13 +263,34 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
               const dataIndex = context.dataIndex
               const rawData = sortedData[dataIndex]
               
+              let label = ''
+              
               if (datasetIndex === 0) { // 売り板
-                return `売り板: ${rawData.ask_total.toLocaleString()} BTC`
+                label = `売り板: ${rawData.ask_total.toLocaleString()} BTC`
               } else if (datasetIndex === 1) { // 買い板
-                return `買い板: ${rawData.bid_total.toLocaleString()} BTC`
+                label = `買い板: ${rawData.bid_total.toLocaleString()} BTC`
               } else { // 価格
-                return `価格: $${rawData.price.toLocaleString()}`
+                label = `価格: $${rawData.price.toLocaleString()}`
               }
+              
+              // 補間データの識別表示
+              if (rawData.isInterpolated) {
+                label += ' (データ欠損・補間値)'
+              }
+              
+              return label
+            },
+            afterBody: function(tooltipItems) {
+              if (tooltipItems.length > 0) {
+                const dataIndex = tooltipItems[0].dataIndex
+                const rawData = sortedData[dataIndex]
+                
+                // 補間データの場合、説明を追加
+                if (rawData.isInterpolated) {
+                  return ['', '※ 前後の値から線形補間で推定']
+                }
+              }
+              return []
             }
           }
         },
