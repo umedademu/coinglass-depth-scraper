@@ -5,7 +5,7 @@ import { fetchTimeframeData, OrderBookData, TimeframeKey, supabase, timeframes }
 import { interpolateMissingData, InterpolatedOrderBookData, detectMissingSlots } from '@/lib/dataInterpolation'
 import MarketInfo from '@/components/MarketInfo'
 import TimeframeSelector from '@/components/TimeframeSelector'
-import UnifiedChart from '@/components/UnifiedChart'
+import UnifiedChart, { UnifiedChartRef } from '@/components/UnifiedChart'
 
 // データキャッシュの型定義
 interface CacheEntry {
@@ -39,6 +39,7 @@ export default function Home() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const channelRef = useRef<any>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const chartRef = useRef<UnifiedChartRef>(null) // Chartコンポーネントへの参照
   
   // localStorageから初期値を取得
   const getInitialTimeframe = (): TimeframeKey => {
@@ -164,8 +165,20 @@ export default function Home() {
       bid: newData.bid_total
     })
     
+    // Chart.jsインスタンスに直接データを追加（ズーム状態を維持）
+    if (chartRef.current) {
+      const interpolatedNewData: InterpolatedOrderBookData = {
+        ...newData,
+        isInterpolated: false
+      }
+      chartRef.current.addRealtimeData(interpolatedNewData)
+    }
+    
+    // 最新データを更新（表示用）
+    setLatestData(newData)
+    
+    // データ配列も更新（他のコンポーネント用）
     setData(prevData => {
-      // 新しいデータを追加（InterpolatedOrderBookDataとして）
       const interpolatedNewData: InterpolatedOrderBookData = {
         ...newData,
         isInterpolated: false
@@ -181,9 +194,6 @@ export default function Home() {
       
       return updatedData
     })
-    
-    // 最新データを更新
-    setLatestData(newData)
     
     // キャッシュも更新
     setDataCache(prev => {
@@ -296,7 +306,7 @@ export default function Home() {
   // 初期データ読み込み
   useEffect(() => {
     async function loadInitialData() {
-      console.log('=== 第6段階：リアルタイム更新 ===')
+      console.log('=== 第6段階：リアルタイム更新（ズーム状態維持版） ===')
       
       try {
         await loadTimeframeData(selectedTimeframe)
@@ -423,7 +433,7 @@ export default function Home() {
         fontSize: '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第6段階：リアルタイム更新
+        Depth Viewer - 第6段階：リアルタイム更新（ズーム状態維持版）
       </h1>
       
       {/* UI配置の最適化: 市場情報 → タイムフレーム選択 → グラフ の順序 */}
@@ -439,7 +449,7 @@ export default function Home() {
       />
       
       {/* 統合グラフの表示（その下） */}
-      <UnifiedChart data={data} />
+      <UnifiedChart ref={chartRef} data={data} />
       
       {/* データ統計情報 */}
       <div style={{

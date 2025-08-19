@@ -16,7 +16,7 @@ import {
 } from 'chart.js'
 import { OrderBookData } from '@/lib/supabase'
 import { InterpolatedOrderBookData } from '@/lib/dataInterpolation'
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useMemo, useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 
 // Chart.jsの必要なコンポーネントを登録
 ChartJS.register(
@@ -41,16 +41,25 @@ interface UnifiedChartProps {
   data: InterpolatedOrderBookData[]
 }
 
-export default function UnifiedChart({ data }: UnifiedChartProps) {
+// 外部から操作可能なメソッドの型定義
+export interface UnifiedChartRef {
+  addRealtimeData: (newData: InterpolatedOrderBookData) => void
+  getChartInstance: () => any
+}
+
+const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data }, ref) => {
   const [isZoomed, setIsZoomed] = useState(false)
   const chartRef = useRef<any>(null)
+  const internalDataRef = useRef<InterpolatedOrderBookData[]>([]) // 内部データ参照
 
   // データを時系列順にソート（メモ化）
   const sortedData = useMemo(() => {
     if (data.length === 0) return []
-    return [...data].sort((a, b) => 
+    const sorted = [...data].sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     )
+    internalDataRef.current = sorted // 内部参照を更新
+    return sorted
   }, [data])
 
   // 動的スケール更新関数（Chart.jsインスタンスを直接操作）
@@ -147,6 +156,89 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
       setIsZoomed(false)
     }
   }
+  
+  // リアルタイムデータを追加する関数
+  const addRealtimeData = useCallback((newData: InterpolatedOrderBookData) => {
+    const chart = chartRef.current
+    if (!chart) return
+    
+    // 内部データに追加
+    internalDataRef.current = [...internalDataRef.current, newData]
+    
+    // メモリ管理（最大5000件）
+    const MAX_POINTS = 5000
+    if (internalDataRef.current.length > MAX_POINTS) {
+      internalDataRef.current = internalDataRef.current.slice(-MAX_POINTS)
+      
+      // ズーム範囲も調整
+      if (chart.scales && chart.scales.x) {
+        const removedCount = 1
+        chart.scales.x.min = Math.max(0, chart.scales.x.min - removedCount)
+        chart.scales.x.max = Math.max(0, chart.scales.x.max - removedCount)
+      }
+    }
+    
+    // 現在のデータを取得
+    const currentData = internalDataRef.current
+    
+    // 新しいタイムスタンプを追加
+    const date = new Date(newData.timestamp)
+    const timeLabel = date.toLocaleTimeString('ja-JP', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    })
+    
+    // 正規化のための計算
+    const askValues = currentData.map(d => d.ask_total)
+    const bidValues = currentData.map(d => d.bid_total)
+    const priceValues = currentData.map(d => d.price)
+    
+    const minAsk = Math.min(...askValues)
+    const maxAsk = Math.max(...askValues)
+    const minBid = Math.min(...bidValues)
+    const maxBid = Math.max(...bidValues)
+    const minPrice = Math.min(...priceValues)
+    const maxPrice = Math.max(...priceValues)
+    
+    const askRange = maxAsk - minAsk
+    const bidRange = maxBid - minBid
+    const maxRange = Math.max(askRange, bidRange) || 1
+    const priceRange = maxPrice - minPrice || 1
+    
+    // 新しいデータポイントを正規化
+    const normalizedAsk = 100 - ((newData.ask_total - minAsk) / maxRange) * 30
+    const normalizedBid = ((newData.bid_total - minBid) / maxRange) * 30
+    const normalizedPrice = ((newData.price - minPrice) / priceRange) * 40 + 30
+    
+    // Chart.jsのデータを直接更新
+    chart.data.labels.push(timeLabel)
+    chart.data.datasets[0].data.push(normalizedAsk)
+    chart.data.datasets[1].data.push(normalizedBid)
+    chart.data.datasets[2].data.push(normalizedPrice)
+    
+    // メモリ管理（グラフ側）
+    if (chart.data.labels.length > MAX_POINTS) {
+      chart.data.labels.shift()
+      chart.data.datasets[0].data.shift()
+      chart.data.datasets[1].data.shift()
+      chart.data.datasets[2].data.shift()
+    }
+    
+    // 現在ズーム中の場合は動的スケールを更新
+    if (isZoomed) {
+      updateDynamicScale(chart)
+    }
+    
+    // アニメーションなしで更新（ズーム状態を維持）
+    chart.update('none')
+  }, [isZoomed, updateDynamicScale])
+  
+  // 外部から操作可能なメソッドを公開
+  useImperativeHandle(ref, () => ({
+    addRealtimeData,
+    getChartInstance: () => chartRef.current
+  }), [addRealtimeData])
 
   // データの正規化と準備
   const { chartData, chartOptions } = useMemo(() => {
@@ -444,4 +536,8 @@ export default function UnifiedChart({ data }: UnifiedChartProps) {
       </div>
     </div>
   )
-}
+})
+
+UnifiedChart.displayName = 'UnifiedChart'
+
+export default UnifiedChart
