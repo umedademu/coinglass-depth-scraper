@@ -11,6 +11,9 @@ import UnifiedChart, { UnifiedChartRef } from '@/components/UnifiedChart'
 interface CacheEntry {
   data: InterpolatedOrderBookData[]
   timestamp: number
+  oldestTimestamp?: string  // 最古のタイムスタンプを追加
+  isLoadingMore?: boolean    // 追加データ読み込み中フラグ
+  hasMore?: boolean         // さらにデータがあるかのフラグ
   stats?: {
     originalCount: number
     interpolatedCount: number
@@ -109,10 +112,15 @@ export default function Home() {
         // データの補完処理
         const { interpolatedData, stats } = interpolateMissingData(orderBookData, timeframe)
         
+        // 最古のタイムスタンプを取得
+        const oldestTimestamp = orderBookData[0].timestamp
+        
         // キャッシュに保存
         const cacheEntry: CacheEntry = {
           data: interpolatedData,
           timestamp: Date.now(),
+          oldestTimestamp,
+          hasMore: orderBookData.length === 1000, // 1000件取得できた場合はまだデータがある可能性
           stats
         }
         
@@ -155,6 +163,107 @@ export default function Home() {
       setTimeframeLoading(false)
     }
   }, [dataCache])
+
+  // 過去データを追加取得する関数（第7段階：無限スクロール）
+  const loadOlderData = useCallback(async (): Promise<InterpolatedOrderBookData[]> => {
+    console.log('=== 第7段階：過去データ取得 ===')
+    
+    const cache = dataCache[selectedTimeframe]
+    if (!cache || !cache.oldestTimestamp || cache.isLoadingMore || !cache.hasMore) {
+      console.log('過去データ取得をスキップ（条件不足）')
+      return []
+    }
+    
+    // ローディング中フラグを立てる
+    setDataCache(prev => ({
+      ...prev,
+      [selectedTimeframe]: {
+        ...prev[selectedTimeframe]!,
+        isLoadingMore: true
+      }
+    }))
+    
+    try {
+      // 追加で1000件取得
+      console.log(`📊 ${selectedTimeframe}の過去データを取得中...`)
+      console.log(`  最古タイムスタンプ: ${cache.oldestTimestamp}`)
+      
+      const olderData = await fetchTimeframeData(selectedTimeframe, 1000, cache.oldestTimestamp)
+      
+      console.log(`✅ ${olderData.length}件の過去データを取得しました`)
+      
+      if (olderData.length > 0) {
+        // データ補完処理
+        const { interpolatedData, stats } = interpolateMissingData(olderData, selectedTimeframe)
+        
+        // 新しい最古のタイムスタンプ
+        const newOldestTimestamp = olderData[0].timestamp
+        
+        // 既存データと結合（古いデータを前に）
+        let combinedData = [...interpolatedData, ...cache.data]
+        
+        // メモリ管理：5000件を超えた場合は新しいデータから削除
+        if (combinedData.length > MAX_DATA_POINTS) {
+          console.log(`⚠️ データ数が${MAX_DATA_POINTS}件を超えたため、新しいデータを削除します`)
+          combinedData = combinedData.slice(0, MAX_DATA_POINTS)
+        }
+        
+        // キャッシュを更新
+        setDataCache(prev => ({
+          ...prev,
+          [selectedTimeframe]: {
+            data: combinedData,
+            timestamp: Date.now(),
+            oldestTimestamp: newOldestTimestamp,
+            hasMore: olderData.length === 1000, // 1000件取得できた場合はまだデータがある
+            isLoadingMore: false,
+            stats: {
+              originalCount: (cache.stats?.originalCount || 0) + stats.originalCount,
+              interpolatedCount: (cache.stats?.interpolatedCount || 0) + stats.interpolatedCount,
+              totalCount: combinedData.length,
+              interpolationRate: ((cache.stats?.interpolatedCount || 0) + stats.interpolatedCount) / combinedData.length * 100
+            }
+          }
+        }))
+        
+        // 表示データも更新
+        setData(combinedData)
+        
+        console.log(`📊 データ統合完了:`)
+        console.log(`  - 追加データ: ${interpolatedData.length}件`)
+        console.log(`  - 合計データ: ${combinedData.length}件`)
+        console.log(`  - 新しい最古タイムスタンプ: ${newOldestTimestamp}`)
+        
+        return interpolatedData
+      } else {
+        // もうデータがない
+        setDataCache(prev => ({
+          ...prev,
+          [selectedTimeframe]: {
+            ...prev[selectedTimeframe]!,
+            hasMore: false,
+            isLoadingMore: false
+          }
+        }))
+        
+        console.log('これ以上過去のデータはありません')
+        return []
+      }
+    } catch (err) {
+      console.error('❌ 過去データ取得エラー:', err)
+      
+      // エラー時はローディングフラグを解除
+      setDataCache(prev => ({
+        ...prev,
+        [selectedTimeframe]: {
+          ...prev[selectedTimeframe]!,
+          isLoadingMore: false
+        }
+      }))
+      
+      return []
+    }
+  }, [selectedTimeframe, dataCache])
 
   // リアルタイムデータ処理
   const handleRealtimeData = useCallback((newData: OrderBookData) => {
@@ -433,7 +542,7 @@ export default function Home() {
         fontSize: '2rem',
         fontWeight: 'bold'
       }}>
-        Depth Viewer - 第6段階：リアルタイム更新（ズーム状態維持版）
+        Depth Viewer - 第7段階：無限スクロール（動的データ取得）
       </h1>
       
       {/* UI配置の最適化: 市場情報 → タイムフレーム選択 → グラフ の順序 */}
@@ -449,7 +558,12 @@ export default function Home() {
       />
       
       {/* 統合グラフの表示（その下） */}
-      <UnifiedChart ref={chartRef} data={data} />
+      <UnifiedChart 
+        ref={chartRef} 
+        data={data} 
+        onLoadOlderData={loadOlderData}
+        isLoadingMore={dataCache[selectedTimeframe]?.isLoadingMore || false}
+      />
       
       {/* データ統計情報 */}
       <div style={{

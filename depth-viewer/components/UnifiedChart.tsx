@@ -39,6 +39,8 @@ if (typeof window !== 'undefined') {
 
 interface UnifiedChartProps {
   data: InterpolatedOrderBookData[]
+  onLoadOlderData?: () => Promise<InterpolatedOrderBookData[]>
+  isLoadingMore?: boolean
 }
 
 // 外部から操作可能なメソッドの型定義
@@ -47,10 +49,13 @@ export interface UnifiedChartRef {
   getChartInstance: () => any
 }
 
-const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data }, ref) => {
+const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onLoadOlderData, isLoadingMore = false }, ref) => {
   const [isZoomed, setIsZoomed] = useState(false)
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  const [isPrefetching, setIsPrefetching] = useState(false)
   const chartRef = useRef<any>(null)
   const internalDataRef = useRef<InterpolatedOrderBookData[]>([]) // 内部データ参照
+  const isLoadingRef = useRef(false) // ローディング中フラグ（重複防止）
 
   // データを時系列順にソート（メモ化）
   const sortedData = useMemo(() => {
@@ -390,9 +395,67 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data }, r
           pan: {
             enabled: true,
             mode: 'x',
-            onPanComplete: ({ chart }: any) => {
+            onPanComplete: async ({ chart }: any) => {
               updateDynamicScale(chart)
               setIsZoomed(true)
+              
+              // 第7段階：左端到達検知と過去データ取得
+              if (onLoadOlderData && !isLoadingRef.current) {
+                const xScale = chart.scales.x
+                const dataLength = chart.data.labels.length
+                
+                // 左端到達を検知（最小値が0に近い場合）
+                if (xScale.min <= 0) {
+                  console.log('🔄 左端に到達！過去データを取得します...')
+                  isLoadingRef.current = true
+                  setIsLoadingOlder(true)
+                  
+                  try {
+                    // 過去データを取得
+                    const newData = await onLoadOlderData()
+                    
+                    if (newData.length > 0) {
+                      console.log(`📊 ${newData.length}件の過去データを取得しました`)
+                      
+                      // X軸インデックスを調整（重要）
+                      const addedCount = newData.length
+                      
+                      // 現在の表示範囲を保持するため、min/maxを調整
+                      if (chart.options.scales?.x) {
+                        chart.options.scales.x.min = xScale.min + addedCount
+                        chart.options.scales.x.max = xScale.max + addedCount
+                      }
+                      
+                      // 即座に反映（ジャンプを防ぐ）
+                      chart.update('none')
+                      
+                      console.log(`📍 X軸インデックスを調整: min=${xScale.min + addedCount}, max=${xScale.max + addedCount}`)
+                    }
+                  } catch (error) {
+                    console.error('❌ 過去データ取得エラー:', error)
+                  } finally {
+                    isLoadingRef.current = false
+                    setIsLoadingOlder(false)
+                  }
+                }
+                
+                // プリフェッチ機能：左端の20%に到達したら先読み開始
+                else if (xScale.min < dataLength * 0.2 && !isPrefetching) {
+                  console.log('📥 プリフェッチ開始（20%地点）')
+                  setIsPrefetching(true)
+                  
+                  // バックグラウンドで先読み
+                  onLoadOlderData().then((newData) => {
+                    if (newData.length > 0) {
+                      console.log(`✅ プリフェッチ完了: ${newData.length}件`)
+                    }
+                    setIsPrefetching(false)
+                  }).catch((error) => {
+                    console.error('❌ プリフェッチエラー:', error)
+                    setIsPrefetching(false)
+                  })
+                }
+              }
             }
           },
           zoom: {
@@ -489,6 +552,51 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data }, r
       height: '850px', // コンテナの高さ（パディング込み）
       position: 'relative'
     }}>
+      {/* ローディングインジケーター（第7段階） */}
+      {(isLoadingOlder || isLoadingMore) && (
+        <div style={{
+          position: 'absolute',
+          top: '1rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(30, 30, 30, 0.9)',
+          padding: '0.5rem 1rem',
+          borderRadius: '4px',
+          zIndex: 11,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <div style={{
+            width: '12px',
+            height: '12px',
+            border: '2px solid #4B5563',
+            borderTopColor: '#fff',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <span style={{ fontSize: '0.875rem', color: '#fff' }}>
+            過去データを取得中...
+          </span>
+        </div>
+      )}
+      
+      {/* プリフェッチインジケーター */}
+      {isPrefetching && (
+        <div style={{
+          position: 'absolute',
+          bottom: '1rem',
+          left: '1rem',
+          backgroundColor: 'rgba(30, 30, 30, 0.7)',
+          padding: '0.25rem 0.5rem',
+          borderRadius: '4px',
+          fontSize: '0.75rem',
+          color: '#999'
+        }}>
+          📥 先読み中...
+        </div>
+      )}
+      
       {/* ズームリセットボタン */}
       {isZoomed && (
         <button
@@ -511,6 +619,13 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data }, r
           ズームリセット
         </button>
       )}
+      
+      {/* スピナーアニメーション用のスタイル */}
+      <style jsx>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       
       <div style={{
         height: '800px', // グラフの高さ800px固定
