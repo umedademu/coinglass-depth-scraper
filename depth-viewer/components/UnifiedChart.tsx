@@ -586,7 +586,10 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
       height: isMobile ? '100%' : '850px', // モバイル時は親の高さに合わせる
       position: 'relative',
       display: isMobile ? 'flex' : 'block',
-      flexDirection: isMobile ? 'column' : undefined
+      flexDirection: isMobile ? 'column' : undefined,
+      width: isMobile ? '100vw' : 'auto',
+      maxWidth: isMobile ? '100vw' : undefined,
+      margin: 0
     }}>
       {/* ローディングインジケーター（第7段階） */}
       {(isLoadingOlder || isLoadingMore) && !isMobile && (
@@ -667,7 +670,8 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
         height: isMobile ? '100%' : '800px', // モバイル時は親の高さに合わせる
         position: 'relative',
         flex: isMobile ? 1 : undefined,
-        minHeight: 0
+        minHeight: 0,
+        width: '100%'
       }}>
         {data.length > 0 ? (
           <Line 

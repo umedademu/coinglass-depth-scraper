@@ -492,7 +492,10 @@ export default function Home() {
       position: 'relative',
       overflow: isMobile ? 'hidden' : 'visible',
       display: isMobile ? 'flex' : 'block',
-      flexDirection: isMobile ? 'column' : undefined
+      flexDirection: isMobile ? 'column' : undefined,
+      width: isMobile ? '100vw' : 'auto',
+      maxWidth: isMobile ? '100vw' : undefined,
+      margin: 0
     }}>
       
       {/* メインコンテンツ */}
@@ -510,7 +513,9 @@ export default function Home() {
           marginBottom: isMobile ? '4px' : '24px',
           flexShrink: 0,
           borderRadius: isMobile ? 0 : undefined,
-          margin: isMobile ? 0 : undefined
+          margin: isMobile ? 0 : undefined,
+          width: isMobile ? '100vw' : 'auto',
+          maxWidth: isMobile ? '100vw' : undefined
         }}>
           <div style={{
             display: isMobile ? 'block' : 'flex',
@@ -569,7 +574,9 @@ export default function Home() {
           display: isMobile ? 'flex' : 'block',
           borderRadius: isMobile ? 0 : undefined,
           padding: isMobile ? 0 : undefined,
-          border: isMobile ? 'none' : undefined
+          border: isMobile ? 'none' : undefined,
+          width: isMobile ? '100vw' : 'auto',
+          maxWidth: isMobile ? '100vw' : undefined
         }}>
           <UnifiedChart 
             ref={chartRef} 
