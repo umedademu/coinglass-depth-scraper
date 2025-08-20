@@ -494,29 +494,6 @@ export default function Home() {
       display: isMobile ? 'flex' : 'block',
       flexDirection: isMobile ? 'column' : undefined
     }}>
-      {/* 接続状態インジケーター */}
-      <div style={{ position: 'fixed', top: isMobile ? '8px' : '16px', right: isMobile ? '8px' : '16px', zIndex: 50 }}>
-        <div className={`
-          status-indicator 
-          ${connectionStatus === 'connected' ? 'status-connected' : 
-            connectionStatus === 'connecting' ? 'status-connecting' : 
-            'status-disconnected'}
-        `}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor', display: 'inline-block' }} />
-          <span style={{ fontSize: '10px' }}>
-            {connectionStatus === 'connected' ? '接続' :
-             connectionStatus === 'connecting' ? '接続中' : '切断'}
-          </span>
-        </div>
-      </div>
-      
-      {/* ヘッダー */}
-      <div style={{ position: 'relative', zIndex: 10, marginBottom: isMobile ? '8px' : '32px', flexShrink: 0 }}>
-        <h1 className="gradient-text" style={{ fontSize: isMobile ? '20px' : '48px', fontWeight: 'bold', marginBottom: isMobile ? '4px' : '8px' }}>
-          Depth Viewer
-        </h1>
-        {!isMobile && <p style={{ color: '#9ca3af', marginTop: '8px' }}>Bitcoin Order Book Real-time Analysis</p>}
-      </div>
       
       {/* メインコンテンツ */}
       <div style={{ 
@@ -538,10 +515,13 @@ export default function Home() {
             gap: isMobile ? '0' : '24px',
             alignItems: 'flex-start'
           }}>
-            {/* タイムフレーム選択 */}
+            {/* タイムフレーム選択と接続状態 */}
             <div style={{
               width: isMobile ? '100%' : 'auto',
-              marginBottom: isMobile ? '8px' : '0'
+              marginBottom: isMobile ? '8px' : '0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
             }}>
               <TimeframeSelector 
                 selectedTimeframe={selectedTimeframe}
@@ -549,6 +529,19 @@ export default function Home() {
                 loading={timeframeLoading}
                 isMobile={isMobile}
               />
+              {/* 接続状態インジケーター */}
+              <div className={`
+                status-indicator 
+                ${connectionStatus === 'connected' ? 'status-connected' : 
+                  connectionStatus === 'connecting' ? 'status-connecting' : 
+                  'status-disconnected'}
+              `} style={{ flexShrink: 0 }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor', display: 'inline-block' }} />
+                <span style={{ fontSize: '10px' }}>
+                  {connectionStatus === 'connected' ? '接続' :
+                   connectionStatus === 'connecting' ? '接続中' : '切断'}
+                </span>
+              </div>
             </div>
             
             {/* 市場情報 */}
