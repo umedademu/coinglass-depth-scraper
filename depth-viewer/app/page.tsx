@@ -515,18 +515,31 @@ export default function Home() {
             gap: isMobile ? '0' : '24px',
             alignItems: 'flex-start'
           }}>
-            {/* タイムフレーム選択と接続状態 */}
+            {/* タイムフレーム選択 */}
             <div style={{
               width: isMobile ? '100%' : 'auto',
-              marginBottom: isMobile ? '8px' : '0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px'
+              marginBottom: isMobile ? '8px' : '0'
             }}>
               <TimeframeSelector 
                 selectedTimeframe={selectedTimeframe}
                 onTimeframeChange={handleTimeframeChange}
                 loading={timeframeLoading}
+                isMobile={isMobile}
+              />
+            </div>
+            
+            {/* 市場情報と接続状態 */}
+            <div style={{
+              width: isMobile ? '100%' : 'auto',
+              flex: isMobile ? 'none' : '1',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              <MarketInfo 
+                latestData={latestData}
+                hoveredData={hoveredData}
+                compact={true}
                 isMobile={isMobile}
               />
               {/* 接続状態インジケーター */}
@@ -542,19 +555,6 @@ export default function Home() {
                    connectionStatus === 'connecting' ? '接続中' : '切断'}
                 </span>
               </div>
-            </div>
-            
-            {/* 市場情報 */}
-            <div style={{
-              width: isMobile ? '100%' : 'auto',
-              flex: isMobile ? 'none' : '1'
-            }}>
-              <MarketInfo 
-                latestData={latestData}
-                hoveredData={hoveredData}
-                compact={true}
-                isMobile={isMobile}
-              />
             </div>
           </div>
         </div>
