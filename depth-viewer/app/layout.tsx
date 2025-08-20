@@ -1,12 +1,22 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ 
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+})
+
+const jetbrainsMono = JetBrains_Mono({ 
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-jetbrains',
+})
 
 export const metadata: Metadata = {
-  title: 'Depth Viewer',
-  description: 'BTC-USDT Order Book Visualization',
+  title: 'Depth Viewer - Real-time Order Book Analysis',
+  description: 'Advanced Bitcoin order book depth visualization with real-time updates',
 }
 
 export default function RootLayout({
@@ -15,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ja">
-      <body className={inter.className}>{children}</body>
+    <html lang="ja" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+      <body className="font-sans antialiased min-h-screen">{children}</body>
     </html>
   )
 }

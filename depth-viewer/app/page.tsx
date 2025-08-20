@@ -486,117 +486,217 @@ export default function Home() {
 
   return (
     <main style={{ 
-      padding: '2rem',
-      minHeight: '100vh',
-      backgroundColor: '#0a0a0a',
-      position: 'relative'
+      height: isMobile ? '100vh' : 'auto',
+      minHeight: isMobile ? 'unset' : '100vh',
+      padding: isMobile ? '8px' : '32px', 
+      position: 'relative',
+      overflow: isMobile ? 'hidden' : 'visible',
+      display: isMobile ? 'flex' : 'block',
+      flexDirection: isMobile ? 'column' : undefined
     }}>
-      {/* 接続状態インジケーター（右上） */}
-      <div style={{
-        position: 'fixed',
-        top: '1rem',
-        right: '1rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        backgroundColor: 'rgba(30, 30, 30, 0.9)',
-        padding: '0.5rem 1rem',
-        borderRadius: '8px',
-        zIndex: 1000
-      }}>
-        <div style={{
-          width: '10px',
-          height: '10px',
-          borderRadius: '50%',
-          backgroundColor: connectionStatus === 'connected' ? '#4ade80' :
-                          connectionStatus === 'connecting' ? '#facc15' : '#f87171'
-        }} />
-        <span style={{
-          fontSize: '0.9rem',
-          color: connectionStatus === 'connected' ? '#4ade80' :
-                 connectionStatus === 'connecting' ? '#facc15' : '#f87171'
-        }}>
-          {connectionStatus === 'connected' ? '接続中' :
-           connectionStatus === 'connecting' ? '接続中...' : '切断'}
-        </span>
+      {/* 接続状態インジケーター */}
+      <div style={{ position: 'fixed', top: isMobile ? '8px' : '16px', right: isMobile ? '8px' : '16px', zIndex: 50 }}>
+        <div className={`
+          status-indicator 
+          ${connectionStatus === 'connected' ? 'status-connected' : 
+            connectionStatus === 'connecting' ? 'status-connecting' : 
+            'status-disconnected'}
+        `}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor', display: 'inline-block' }} />
+          <span style={{ fontSize: '10px' }}>
+            {connectionStatus === 'connected' ? '接続' :
+             connectionStatus === 'connecting' ? '接続中' : '切断'}
+          </span>
+        </div>
       </div>
       
-      <h1 style={{ 
-        marginBottom: '2rem',
-        fontSize: isMobile ? '1.5rem' : '2rem',
-        fontWeight: 'bold'
-      }}>
-        Depth Viewer
-      </h1>
+      {/* ヘッダー */}
+      <div style={{ position: 'relative', zIndex: 10, marginBottom: isMobile ? '8px' : '32px', flexShrink: 0 }}>
+        <h1 className="gradient-text" style={{ fontSize: isMobile ? '20px' : '48px', fontWeight: 'bold', marginBottom: isMobile ? '4px' : '8px' }}>
+          Depth Viewer
+        </h1>
+        {!isMobile && <p style={{ color: '#9ca3af', marginTop: '8px' }}>Bitcoin Order Book Real-time Analysis</p>}
+      </div>
       
-      {/* UI配置の最適化: デスクトップは横並び、モバイルは縦積み */}
-      <div style={{
-        display: isMobile ? 'block' : 'flex',
-        gap: isMobile ? '0' : '1rem',
-        alignItems: 'center',
-        marginBottom: '1rem',
-        backgroundColor: '#2a2a2a',
-        borderRadius: '8px',
-        padding: '1rem'
+      {/* メインコンテンツ */}
+      <div style={{ 
+        position: 'relative', 
+        zIndex: 10, 
+        flex: isMobile ? 1 : undefined,
+        display: isMobile ? 'flex' : 'block',
+        flexDirection: isMobile ? 'column' : undefined,
+        minHeight: 0
       }}>
-        {/* タイムフレーム選択（左側/上） */}
-        <TimeframeSelector 
-          selectedTimeframe={selectedTimeframe}
-          onTimeframeChange={handleTimeframeChange}
-          loading={timeframeLoading}
-        />
-        
-        {/* 市場情報（右側/下、コンパクトモード） */}
-        <div style={{
-          flex: isMobile ? 'none' : '1 1 auto'
+        {/* タイムフレーム選択とマーケット情報 */}
+        <div className="glass-card fade-in" style={{ 
+          padding: isMobile ? '8px' : '24px', 
+          marginBottom: isMobile ? '8px' : '24px',
+          flexShrink: 0
         }}>
-          <MarketInfo 
-            latestData={latestData}
-            hoveredData={hoveredData}
-            compact={!isMobile}
+          <div style={{
+            display: isMobile ? 'block' : 'flex',
+            gap: isMobile ? '0' : '24px',
+            alignItems: 'flex-start'
+          }}>
+            {/* タイムフレーム選択 */}
+            <div style={{
+              width: isMobile ? '100%' : 'auto',
+              marginBottom: isMobile ? '8px' : '0'
+            }}>
+              <TimeframeSelector 
+                selectedTimeframe={selectedTimeframe}
+                onTimeframeChange={handleTimeframeChange}
+                loading={timeframeLoading}
+                isMobile={isMobile}
+              />
+            </div>
+            
+            {/* 市場情報 */}
+            <div style={{
+              width: isMobile ? '100%' : 'auto',
+              flex: isMobile ? 'none' : '1'
+            }}>
+              <MarketInfo 
+                latestData={latestData}
+                hoveredData={hoveredData}
+                compact={true}
+                isMobile={isMobile}
+              />
+            </div>
+          </div>
+        </div>
+      
+        {/* チャートコンテナ */}
+        <div className="chart-container slide-up" style={{ 
+          marginBottom: isMobile ? 0 : '24px',
+          flex: isMobile ? 1 : undefined,
+          minHeight: 0,
+          display: isMobile ? 'flex' : 'block'
+        }}>
+          <UnifiedChart 
+            ref={chartRef} 
+            data={data} 
+            onLoadOlderData={loadOlderData}
+            isLoadingMore={dataCache[selectedTimeframe]?.isLoadingMore || false}
+            onHoverData={setHoveredData}
+            isMobile={isMobile}
           />
         </div>
-      </div>
       
-      {/* 統合グラフの表示 */}
-      <UnifiedChart 
-        ref={chartRef} 
-        data={data} 
-        onLoadOlderData={loadOlderData}
-        isLoadingMore={dataCache[selectedTimeframe]?.isLoadingMore || false}
-        onHoverData={setHoveredData}
-        isMobile={isMobile}
-      />
-      
-      {/* データ統計情報 */}
-      <div style={{
-        marginTop: '2rem',
-        padding: '1rem',
-        backgroundColor: '#1e1e1e',
-        borderRadius: '8px',
-        color: '#999',
-        fontSize: '0.9rem'
-      }}>
-        <div>📊 表示データ数: {data.length}件</div>
-        <div>⏱️ タイムフレーム: {selectedTimeframe}</div>
-        {dataCache[selectedTimeframe]?.stats && (
-          <>
-            <div>📊 補完後: {dataCache[selectedTimeframe]?.stats.totalCount}件（実データ: {dataCache[selectedTimeframe]?.stats.originalCount}件, 補間: {dataCache[selectedTimeframe]?.stats.interpolatedCount}件, 補間率: {dataCache[selectedTimeframe]?.stats.interpolationRate.toFixed(1)}%）</div>
-          </>
-        )}
-        {data.length > 0 && (
-          <>
-            <div>🕐 データ期間: {new Date(data[0].timestamp).toLocaleString('ja-JP')} ～ {new Date(data[data.length - 1].timestamp).toLocaleString('ja-JP')}</div>
-            <div>🖱️ マウスホイール: ズーム | ドラッグ: パン（移動）</div>
-          </>
-        )}
-        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #333' }}>
-          <div>📡 リアルタイム更新: {connectionStatus === 'connected' ? '有効' : connectionStatus === 'connecting' ? '接続中...' : '無効'}</div>
-          {latestData && (
-            <div>🔄 最終更新: {new Date(latestData.timestamp).toLocaleString('ja-JP')}</div>
-          )}
-          <div>💾 メモリ管理: 最大{MAX_DATA_POINTS.toLocaleString()}件保持</div>
+        {/* データ統計情報 - モバイルでは非表示 */}
+        {!isMobile && (
+        <div className="glass-card fade-in" style={{ padding: '24px' }}>
+          <h3 className="gradient-text" style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>データ統計</h3>
+          
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '16px'
+          }}>
+            <div className="data-card">
+              <span className="metric-label">表示データ数</span>
+              <span className="metric-value" style={{ fontSize: '20px' }}>{data.length.toLocaleString()}</span>
+            </div>
+            
+            <div className="data-card">
+              <span className="metric-label">タイムフレーム</span>
+              <span className="metric-value" style={{ fontSize: '20px' }}>{selectedTimeframe}</span>
+            </div>
+            
+            {dataCache[selectedTimeframe]?.stats && (
+              <div className="data-card">
+                <span className="metric-label">データ品質</span>
+                <div style={{ marginTop: '8px' }}>
+                  <div style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '4px' }}>
+                    実データ: {dataCache[selectedTimeframe]?.stats.originalCount}件
+                  </div>
+                  <div style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '4px' }}>
+                    補間: {dataCache[selectedTimeframe]?.stats.interpolatedCount}件
+                  </div>
+                  <div style={{ fontSize: '14px', fontWeight: '500', color: '#fbbf24' }}>
+                    補間率: {dataCache[selectedTimeframe]?.stats.interpolationRate.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {data.length > 0 && (
+              <div className="data-card">
+                <span className="metric-label">データ期間</span>
+                <div className="font-mono" style={{ fontSize: '14px', color: '#d1d5db' }}>
+                  {new Date(data[0].timestamp).toLocaleString('ja-JP', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                  <span style={{ color: '#6b7280', margin: '0 4px' }}>～</span>
+                  {new Date(data[data.length - 1].timestamp).toLocaleString('ja-JP', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </div>
+              </div>
+            )}
+            
+            <div className="data-card">
+              <span className="metric-label">リアルタイム更新</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                <span style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: connectionStatus === 'connected' ? '#10b981' : '#ef4444',
+                  display: 'inline-block',
+                  animation: connectionStatus === 'connected' ? 'pulse 2s infinite' : 'none'
+                }} />
+                <span style={{ fontSize: '14px', fontWeight: '500' }}>
+                  {connectionStatus === 'connected' ? '有効' : connectionStatus === 'connecting' ? '接続中...' : '無効'}
+                </span>
+              </div>
+            </div>
+            
+            {latestData && (
+              <div className="data-card">
+                <span className="metric-label">最終更新</span>
+                <span className="font-mono" style={{ fontSize: '14px', color: '#d1d5db' }}>
+                  {new Date(latestData.timestamp).toLocaleString('ja-JP', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    second: '2-digit' 
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '12px', color: '#9ca3af' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg style={{ width: '16px', height: '16px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <span>マウスホイール: ズーム</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg style={{ width: '16px', height: '16px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                <span>ドラッグ: パン（移動）</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg style={{ width: '16px', height: '16px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                </svg>
+                <span>最大{MAX_DATA_POINTS.toLocaleString()}件保持</span>
+              </div>
+            </div>
+          </div>
         </div>
+        )}
       </div>
     </main>
   )

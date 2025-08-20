@@ -16,13 +16,13 @@ export interface OrderBookData {
 }
 
 export const timeframes = [
-  { key: '5min', label: '5分足', table: 'order_book_5min' },
-  { key: '15min', label: '15分足', table: 'order_book_15min' },
-  { key: '30min', label: '30分足', table: 'order_book_30min' },
-  { key: '1hour', label: '1時間足', table: 'order_book_1hour' },
-  { key: '2hour', label: '2時間足', table: 'order_book_2hour' },
-  { key: '4hour', label: '4時間足', table: 'order_book_4hour' },
-  { key: '1day', label: '日足', table: 'order_book_daily' },
+  { key: '5min', label: '5分', table: 'order_book_5min' },
+  { key: '15min', label: '15分', table: 'order_book_15min' },
+  { key: '30min', label: '30分', table: 'order_book_30min' },
+  { key: '1hour', label: '1時間', table: 'order_book_1hour' },
+  { key: '2hour', label: '2時間', table: 'order_book_2hour' },
+  { key: '4hour', label: '4時間', table: 'order_book_4hour' },
+  { key: '1day', label: '1日', table: 'order_book_daily' },
 ] as const
 
 export type TimeframeKey = typeof timeframes[number]['key']

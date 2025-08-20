@@ -38,7 +38,7 @@ if (typeof window !== 'undefined') {
 }
 
 // 初期表示件数（TradingView/MT5準拠）
-const INITIAL_DISPLAY_COUNT = 250
+const INITIAL_DISPLAY_COUNT = 120
 
 interface UnifiedChartProps {
   data: InterpolatedOrderBookData[]
@@ -567,15 +567,17 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
 
   return (
     <div style={{
-      marginTop: '2rem',
-      padding: '1.5rem',
+      marginTop: isMobile ? '0' : '2rem',
+      padding: isMobile ? '0.5rem' : '1.5rem',
       backgroundColor: '#1e1e1e',
       borderRadius: '8px',
-      height: '850px', // コンテナの高さ（パディング込み）
-      position: 'relative'
+      height: isMobile ? '100%' : '850px', // モバイル時は親の高さに合わせる
+      position: 'relative',
+      display: isMobile ? 'flex' : 'block',
+      flexDirection: isMobile ? 'column' : undefined
     }}>
       {/* ローディングインジケーター（第7段階） */}
-      {(isLoadingOlder || isLoadingMore) && (
+      {(isLoadingOlder || isLoadingMore) && !isMobile && (
         <div style={{
           position: 'absolute',
           top: '1rem',
@@ -604,7 +606,7 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
       )}
       
       {/* プリフェッチインジケーター */}
-      {isPrefetching && (
+      {isPrefetching && !isMobile && (
         <div style={{
           position: 'absolute',
           bottom: '1rem',
@@ -625,20 +627,20 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           onClick={handleResetZoom}
           style={{
             position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            padding: '0.5rem 1rem',
+            top: isMobile ? '0.5rem' : '1rem',
+            right: isMobile ? '0.5rem' : '1rem',
+            padding: isMobile ? '0.25rem 0.5rem' : '0.5rem 1rem',
             backgroundColor: '#4B5563',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
             zIndex: 10,
-            fontSize: '0.875rem',
+            fontSize: isMobile ? '0.75rem' : '0.875rem',
             fontWeight: '500'
           }}
         >
-          ズームリセット
+          リセット
         </button>
       )}
       
@@ -650,8 +652,10 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
       `}</style>
       
       <div style={{
-        height: '800px', // グラフの高さ800px固定
-        position: 'relative'
+        height: isMobile ? '100%' : '800px', // モバイル時は親の高さに合わせる
+        position: 'relative',
+        flex: isMobile ? 1 : undefined,
+        minHeight: 0
       }}>
         {data.length > 0 ? (
           <Line 
