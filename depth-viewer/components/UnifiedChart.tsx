@@ -386,6 +386,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
     const chartOptions: ChartOptions<'line'> = {
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: isMobile ? 0 : undefined
+      },
       plugins: {
         legend: {
           display: false // 凡例を非表示
@@ -498,10 +501,13 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           },
           ticks: {
             color: '#999',
-            maxRotation: 45,
-            minRotation: 45,
+            maxRotation: isMobile ? 0 : 45,
+            minRotation: isMobile ? 0 : 45,
             autoSkip: true,  // 重要：自動的にラベルを間引く
-            maxTicksLimit: isMobile ? 10 : 20  // 表示する最大ラベル数
+            maxTicksLimit: isMobile ? 6 : 20,  // 表示する最大ラベル数
+            font: {
+              size: isMobile ? 10 : 11
+            }
           }
         },
         y: { // 左側Y軸（ASK/BID用）
@@ -513,6 +519,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           },
           ticks: {
             color: '#999',
+            font: {
+              size: isMobile ? 10 : 11
+            },
             callback: function(value: any) {
               const numValue = Number(value)
               
@@ -546,6 +555,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
           },
           ticks: {
             color: '#999',
+            font: {
+              size: isMobile ? 10 : 11
+            },
             callback: function(value: any) {
               const numValue = Number(value)
               
@@ -568,9 +580,9 @@ const UnifiedChart = forwardRef<UnifiedChartRef, UnifiedChartProps>(({ data, onL
   return (
     <div style={{
       marginTop: isMobile ? '0' : '2rem',
-      padding: isMobile ? '0.5rem' : '1.5rem',
+      padding: isMobile ? '0' : '1.5rem',
       backgroundColor: '#1e1e1e',
-      borderRadius: '8px',
+      borderRadius: isMobile ? '0' : '8px',
       height: isMobile ? '100%' : '850px', // モバイル時は親の高さに合わせる
       position: 'relative',
       display: isMobile ? 'flex' : 'block',

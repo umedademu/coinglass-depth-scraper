@@ -52,7 +52,7 @@ const MarketInfo = React.memo(function MarketInfo({ latestData, hoveredData, com
   // コンパクトモード
   if (compact) {
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '8px' : '16px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '4px' : '16px', alignItems: 'center' }}>
         <div className="data-card" style={{ padding: isMobile ? '4px' : undefined }}>
           <span className="metric-label" style={{ fontSize: isMobile ? '10px' : undefined }}>価格</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

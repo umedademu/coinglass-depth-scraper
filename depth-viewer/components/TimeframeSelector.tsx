@@ -16,7 +16,7 @@ const TimeframeSelector = React.memo(function TimeframeSelector({
 }: TimeframeSelectorProps) {
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '4px' : '8px', justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? '2px' : '8px', justifyContent: isMobile ? 'space-between' : 'center', alignItems: 'center' }}>
         {timeframes.map((tf) => (
           <button
             key={tf.key}

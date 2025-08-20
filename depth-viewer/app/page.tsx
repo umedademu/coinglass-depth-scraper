@@ -488,7 +488,7 @@ export default function Home() {
     <main style={{ 
       height: isMobile ? '100vh' : 'auto',
       minHeight: isMobile ? 'unset' : '100vh',
-      padding: isMobile ? '8px' : '32px', 
+      padding: isMobile ? '0' : '32px', 
       position: 'relative',
       overflow: isMobile ? 'hidden' : 'visible',
       display: isMobile ? 'flex' : 'block',
@@ -506,9 +506,11 @@ export default function Home() {
       }}>
         {/* タイムフレーム選択とマーケット情報 */}
         <div className="glass-card fade-in" style={{ 
-          padding: isMobile ? '8px' : '24px', 
-          marginBottom: isMobile ? '8px' : '24px',
-          flexShrink: 0
+          padding: isMobile ? '4px' : '24px', 
+          marginBottom: isMobile ? '4px' : '24px',
+          flexShrink: 0,
+          borderRadius: isMobile ? 0 : undefined,
+          margin: isMobile ? 0 : undefined
         }}>
           <div style={{
             display: isMobile ? 'block' : 'flex',
@@ -518,7 +520,7 @@ export default function Home() {
             {/* タイムフレーム選択 */}
             <div style={{
               width: isMobile ? '100%' : 'auto',
-              marginBottom: isMobile ? '8px' : '0'
+              marginBottom: isMobile ? '4px' : '0'
             }}>
               <TimeframeSelector 
                 selectedTimeframe={selectedTimeframe}
@@ -564,7 +566,10 @@ export default function Home() {
           marginBottom: isMobile ? 0 : '24px',
           flex: isMobile ? 1 : undefined,
           minHeight: 0,
-          display: isMobile ? 'flex' : 'block'
+          display: isMobile ? 'flex' : 'block',
+          borderRadius: isMobile ? 0 : undefined,
+          padding: isMobile ? 0 : undefined,
+          border: isMobile ? 'none' : undefined
         }}>
           <UnifiedChart 
             ref={chartRef} 
